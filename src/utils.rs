@@ -70,7 +70,7 @@ fn get_config_path() -> Result<PathBuf>{
     }
 
     #[cfg(debug_assertions)]
-    success!("✓ 配置文件定位 -> {}", config_path.display());
+    success!("配置文件定位 -> {}", config_path.display());
 
     Ok(config_path)
 }

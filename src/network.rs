@@ -1,4 +1,4 @@
-use crate::{account, error, process, success};
+use crate::{account, error, process, success, warning};
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -147,7 +147,7 @@ impl Session {
 
     /// 登录!
     pub fn login(&self, account: &account::Account) -> Result<()> {
-        process!("登录");
+        process!("登录……");
         let login_url = "https://zjuam.zju.edu.cn/cas/login";
         let res = self.client.get(login_url).send()?;
         let text = res.text()?;
@@ -321,6 +321,55 @@ impl Session {
         Ok(activity_upload_record)
     }
 
+    /// 拉取活动！
+    fn fetch_activities(&self, selected_course: &CourseFull) -> Result<Vec<Value>> {
+        const MAX_RETRIES: usize = 3;
+        let url = format!(
+            "https://courses.zju.edu.cn/api/courses/{}/activities",
+            selected_course.id
+        );
+        for attempt in 1..=MAX_RETRIES {
+            match self.client.get(&url).send() {
+                Ok(res) => match res.json::<Value>() {
+                    Ok(json) => {
+                        if let Some(activities) = json["activities"].as_array() {
+                            #[cfg(debug_assertions)]
+                            success!("{} :: activities",selected_course.name);
+
+                            return Ok(activities.clone());
+                        } else {
+                            warning!(
+                                "retry {}/{}: {} 的返回 json 无 activities 字段",
+                                attempt,
+                                MAX_RETRIES,
+                                selected_course.name
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warning!(
+                            "retry {}/{}: {} 的返回无法解析为 json: {}",
+                            attempt,
+                            MAX_RETRIES,
+                            selected_course.name,
+                            e
+                        );
+                    }
+                },
+                Err(e) => {
+                    warning!(
+                        "retry {}/{}: {} 的请求失败: {}",
+                        attempt,
+                        MAX_RETRIES,
+                        selected_course.name,
+                        e
+                    );
+                }
+            }
+        }
+        Err(anyhow!("{} 的请求失败", selected_course.name))
+    }
+
     /// 拉取新课件！
     pub fn fetch_activity_uploads(
         &self,
@@ -330,20 +379,11 @@ impl Session {
         mut activity_upload_record: Vec<u64>,
         is_pdf: bool,
     ) -> Result<()> {
-        process!("拉取新课件");
+        process!("拉取新课件……");
         let mut tasks = Vec::new();
 
         for selected_course in selected_courses {
-            let res = self
-                .client
-                .get(format!(
-                    "https://courses.zju.edu.cn/api/courses/{}/activities",
-                    selected_course.id
-                ))
-                .send()?;
-            let json: Value = res.json()?;
-            println!("{:?}", json);
-            let activities = json["activities"].as_array().unwrap();
+            let activities = self.fetch_activities(&selected_course)?;
 
             for activity in activities {
                 let uploads = activity["uploads"].as_array().unwrap();
@@ -370,7 +410,9 @@ impl Session {
             let successful_uploads: Vec<u64> = tasks
                 .par_iter()
                 .filter_map(|(semester, course_name, upload_id, file_name)| {
-                    // 开始下载
+                    #[cfg(debug_assertions)]
+                    process!("{} :: {}",course_name,file_name);
+
                     match Session::download_upload(
                         self,
                         &path_download.join(semester).join(course_name),
@@ -442,7 +484,7 @@ impl Session {
             }
         };
 
-        let mut  res = self.get(&download_url).send()?;
+        let mut res = self.get(&download_url).send()?;
 
         fs::create_dir_all(std::path::Path::new(path_download))?;
 
@@ -468,7 +510,7 @@ impl Session {
             error!("下载失败：{}", e);
             e
         })?;
-        
+
         success!("{} -> {}", file_name, path_download.display());
         Ok(())
     }

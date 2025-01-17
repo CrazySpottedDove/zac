@@ -47,7 +47,7 @@ fn main() {
         process!("交互模式");
         Cli::command().print_help().unwrap();
         loop {
-            println!("请输入命令 (fetch|f, submit|s, upgrade|u, config|c) 或 exit|q 退出:");
+            process!("输入命令 (fetch|f, submit|s, upgrade|u, config|c) | (exit|q) 退出");
             let mut input = String::new();
             std::io::stdin()
                 .read_line(&mut input)
