@@ -1,6 +1,6 @@
 [package]
 name = "zac"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 
 [dependencies]
@@ -16,3 +16,7 @@ anyhow="1.0.95"
 regex ={ version = "1.11.1"}
 num="0.4.3"
 rayon="1.5.1"
+indicatif={version = "0.17.0", optional = true}
+
+[features]
+pb = ["indicatif"]

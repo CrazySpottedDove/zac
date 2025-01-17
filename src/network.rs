@@ -15,6 +15,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(feature = "pb")]
+use {
+    indicatif::{MultiProgress, ProgressBar, ProgressStyle},
+    std::io::{Read, Write},
+    colored::*,
+};
+
 fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
     let m = num::BigUint::parse_bytes(modulus.as_bytes(), 16).unwrap();
     let e = num::BigUint::parse_bytes(exponent.as_bytes(), 16).unwrap();
@@ -334,7 +341,7 @@ impl Session {
                     Ok(json) => {
                         if let Some(activities) = json["activities"].as_array() {
                             #[cfg(debug_assertions)]
-                            success!("{} :: activities",selected_course.name);
+                            success!("{}::activities", selected_course.name.trim());
 
                             return Ok(activities.clone());
                         } else {
@@ -371,6 +378,7 @@ impl Session {
     }
 
     /// 拉取新课件！
+    #[cfg(feature = "pb")]
     pub fn fetch_activity_uploads(
         &self,
         path_download: &PathBuf,
@@ -404,6 +412,186 @@ impl Session {
             }
         }
 
+        if tasks.is_empty() {
+            warning!("没有新课件");
+            return Ok(());
+        }
+
+        let multi_pb = Arc::new(MultiProgress::new());
+        // 进度条样式
+        let pb_style = ProgressStyle::with_template(
+            "{msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})",
+        )
+        .unwrap()
+        .progress_chars("=>-");
+
+        // 用自定义线程池将并发限制为 4
+        let pool = ThreadPoolBuilder::new().num_threads(4).build()?;
+        pool.install(|| {
+            let successful_uploads: Vec<u64> = tasks
+                .par_iter()
+                .filter_map(|(semester, course_name, upload_id, file_name)| {
+                    let pb = multi_pb.add(ProgressBar::new(0));
+                    pb.set_style(pb_style.clone());
+                    pb.set_message(format!("{} {}","⚙".blue() ,file_name));
+                    match Session::download_upload(
+                        self,
+                        &path_download.join(semester).join(course_name),
+                        *upload_id,
+                        file_name,
+                        is_pdf,
+                        pb,
+                    ) {
+                        Ok(_) => Some(*upload_id),
+                        Err(e) => {
+                            error!("下载 {} ：{}", file_name, e);
+                            None
+                        }
+                    }
+                })
+                .collect();
+            if !successful_uploads.is_empty() {
+                success!("拉取新课件");
+                activity_upload_record.extend(successful_uploads);
+                match Session::store_activity_upload_record(
+                    path_activity_upload_record,
+                    &activity_upload_record,
+                ) {
+                    Ok(_) => {}
+                    Err(e) => error!("存储下载课件记录：{}", e),
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// 下载一个upload文件！
+    #[cfg(feature = "pb")]
+    pub fn download_upload(
+        &self,
+        path_download: &PathBuf,
+        id: u64,
+        name: &str,
+        is_pdf: bool,
+        pb: ProgressBar,
+    ) -> Result<()> {
+        let download_url = if is_pdf {
+            let mut retries = 0;
+            let url;
+            loop {
+                let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
+                        error!("json失败：{}", e);
+                        Err(e)
+                    })?;
+
+                if json["status"].as_str().unwrap() == "ready" {
+                    url = json["url"].as_str().unwrap().to_string();
+                    break;
+                }
+
+                retries += 1;
+                if retries == 3 {
+                    error!("雪灾浙大一直准备不好 {}", name);
+                    return Ok(());
+                }
+            }
+            url
+        } else {
+            format!(
+                "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",
+                id
+            )
+        };
+
+        let mut res = self.get(&download_url).send()?;
+
+        fs::create_dir_all(path_download)?;
+
+        // 修改文件名的拓展名与下载链接一致
+        let file_name = if is_pdf {
+            let extension = std::path::Path::new(&download_url)
+                .extension()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            std::path::Path::new(name)
+                .with_extension(extension)
+                .to_string_lossy()
+                .to_string()
+        } else {
+            name.to_string()
+        };
+
+        let mut file = File::create(std::path::Path::new(path_download).join(&file_name))?;
+
+        let total_size = res
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|l| l.to_str().ok().and_then(|s| s.parse::<u64>().ok()))
+            .unwrap_or(0);
+
+        if total_size > 0 {
+            pb.set_length(total_size);
+        } else {
+            pb.set_length(0);
+        }
+
+        let mut buffer = [0; 8192];
+
+        loop {
+            let bytes = res.read(&mut buffer)?;
+            if bytes == 0 {
+                break;
+            }
+            file.write_all(&buffer[..bytes])?;
+            pb.inc(bytes as u64);
+        }
+
+        pb.finish_with_message(format!("{} {}", "✓".green(), file_name));
+        Ok(())
+    }
+
+    /// 拉取新课件！
+    #[cfg(not(feature = "pb"))]
+    pub fn fetch_activity_uploads(
+        &self,
+        path_download: &PathBuf,
+        path_activity_upload_record: &PathBuf,
+        selected_courses: Vec<CourseFull>,
+        mut activity_upload_record: Vec<u64>,
+        is_pdf: bool,
+    ) -> Result<()> {
+        process!("拉取新课件……");
+        let mut tasks = Vec::new();
+
+        for selected_course in selected_courses {
+            let activities = self.fetch_activities(&selected_course)?;
+
+            for activity in activities {
+                let uploads = activity["uploads"].as_array().unwrap();
+                for upload in uploads {
+                    if let Some(id) = upload["reference_id"].as_u64() {
+                        if activity_upload_record.contains(&id) {
+                            continue;
+                        }
+                        let name = upload["name"].as_str().unwrap_or("unnamed").to_string();
+                        tasks.push((
+                            selected_course.semester.clone(),
+                            selected_course.name.clone(),
+                            id,
+                            name,
+                        ));
+                    }
+                }
+            }
+        }
+
+        if tasks.is_empty() {
+            warning!("没有新课件");
+            return Ok(());
+        }
+
         // 用自定义线程池将并发限制为 4
         let pool = ThreadPoolBuilder::new().num_threads(4).build()?;
         pool.install(|| {
@@ -411,7 +599,7 @@ impl Session {
                 .par_iter()
                 .filter_map(|(semester, course_name, upload_id, file_name)| {
                     #[cfg(debug_assertions)]
-                    process!("{} :: {}",course_name,file_name);
+                    process!("{} :: {}", course_name, file_name);
 
                     match Session::download_upload(
                         self,
@@ -445,6 +633,7 @@ impl Session {
     }
 
     /// 下载一个upload文件！
+    #[cfg(not(feature = "pb"))]
     pub fn download_upload(
         &self,
         path_download: &PathBuf,
@@ -452,41 +641,37 @@ impl Session {
         name: &str,
         is_pdf: bool,
     ) -> Result<()> {
-        let download_url = match is_pdf {
-            true => {
-                let mut retries = 0;
-                let url;
-                loop {
-                    let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
+        let download_url = if is_pdf {
+            let mut retries = 0;
+            let url;
+            loop {
+                let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
                         error!("json失败：{}", e);
                         Err(e)
                     })?;
 
-                    if json["status"].as_str().unwrap() == "ready" {
-                        url = json["url"].as_str().unwrap().to_string();
-                        break;
-                    }
-
-                    retries += 1;
-                    if retries == 3 {
-                        error!("雪灾浙大一直准备不好 {}", name);
-                        return Ok(());
-                    }
+                if json["status"].as_str().unwrap() == "ready" {
+                    url = json["url"].as_str().unwrap().to_string();
+                    break;
                 }
-                url
+
+                retries += 1;
+                if retries == 3 {
+                    error!("雪灾浙大一直准备不好 {}", name);
+                    return Ok(());
+                }
             }
-            false => {
-                let url = format!(
-                    "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",
-                    id
-                );
-                url
-            }
+            url
+        } else {
+            format!(
+                "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",
+                id
+            )
         };
 
         let mut res = self.get(&download_url).send()?;
 
-        fs::create_dir_all(std::path::Path::new(path_download))?;
+        fs::create_dir_all(path_download)?;
 
         // 修改文件名的拓展名与下载链接一致
         let file_name = if is_pdf {
