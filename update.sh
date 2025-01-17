@@ -18,7 +18,7 @@ git push origin master "$version" --force
 
 linux_path=$(pwd)/target/release/zac
 windows_path=$(pwd)/target/x86_64-pc-windows-gnu/release/zac.exe
-gh release create "${version}" "${linux_path}" "${windows_path}" --title "${version}" --latest "linux: zac\nwindows: zac.exe"
+gh release create "${version}" "${linux_path}" "${windows_path}" --title "${version}" --latest --notes "linux: zac\nwindows: zac.exe"
 
 #  The script is pretty simple. It takes two arguments: the version and the comment. It then commits the changes, tags the commit with the version, pushes the changes to the remote repository, and creates a new release on GitHub.
 #  The script assumes that the binary files are located in the  target/release  and  target/x86_64-pc-windows-gnu/release  directories.
