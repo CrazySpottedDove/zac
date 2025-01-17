@@ -21,6 +21,7 @@ windows_path=$(pwd)/target/x86_64-pc-windows-gnu/release/zac.exe
 
 cargo build --release
 cargo build --release --target x86_64-pc-windows-gnu
+
 gh release create "${version}" "${linux_path}" "${windows_path}" --title "${version}" --latest --notes "**linux** : zac  <br> **windows** : zac.exe"
 
 #  The script is pretty simple. It takes two arguments: the version and the comment. It then commits the changes, tags the commit with the version, pushes the changes to the remote repository, and creates a new release on GitHub.
