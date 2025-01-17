@@ -1,6 +1,7 @@
 [package]
 name = "zac"
 version = "0.0.1"
+about = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具"
 edition = "2021"
 
 [dependencies]
