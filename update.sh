@@ -1,9 +1,9 @@
 #!/bin/bash
 version=$1
-cargo build --release --features pb --target-dir target_linux_pb
-cargo build --release --target-dir target_linux_no_pb
-cargo build --release --features pb --target-dir target_windows_pb --target x86_64-pc-windows-gnu
-cargo build --release --target-dir target_windows_no_pb --target x86_64-pc-windows-gnu
+cargo build --release --features pb --target-dir target_linux_pb --bin zacpb
+cargo build --release --target-dir target_linux_no_pb --bin zac
+cargo build --release --features pb --target-dir target_windows_pb --target x86_64-pc-windows-gnu --bin zacpb
+cargo build --release --target-dir target_windows_no_pb --target x86_64-pc-windows-gnu --bin zac
 
 if [ -z "$version" ]; then
     echo "Usage: $0 <version eg. v0.0.1> <comment>"
@@ -22,12 +22,11 @@ git tag "$version"
 git push origin master "$version" --force
 
 linux_no_pb_path=$(pwd)/target_linux_no_pb/release/zac
-linux_pb_path=$(pwd)/target_linux_pb/release/zac
+linux_pb_path=$(pwd)/target_linux_pb/release/zacpb
 windows_no_pb_path=$(pwd)/target_windows_no_pb/x86_64-pc-windows-gnu/release/zac.exe
-windows_pb_path=$(pwd)/target_windows_pb/x86_64-pc-windows-gnu/release/zac.exe
+windows_pb_path=$(pwd)/target_windows_pb/x86_64-pc-windows-gnu/release/zacpb.exe
 
-gh release create "${version}" "${linux_no_pb_path}" "${windows_no_pb_path}" --title "${version}" --latest --notes "无进度条版本<br>**linux** : zac  <br> **windows** : zac.exe"
-gh release create "${version}" "${linux_pb_path}" "${windows_pb_path}" --title "${version}: pb-featured" --latest --notes "**linux** : zac  <br> **windows** : zac.exe"
+gh release create "${version}" "${linux_no_pb_path}" "${windows_no_pb_path}" "${linux_pb_path}" "${windows_pb_path}" --title "${version}" --latest --notes "无进度条版本<br>**linux** : zac <br> **windows** : zac.exe <br>有进度条版本<br>**linux** : zacpb <br> **windows** : zacpb.exe"
 
 #  The script is pretty simple. It takes two arguments: the version and the comment. It then commits the changes, tags the commit with the version, pushes the changes to the remote repository, and creates a new release on GitHub.
 #  The script assumes that the binary files are located in the  target/release  and  target/x86_64-pc-windows-gnu/release  directories.

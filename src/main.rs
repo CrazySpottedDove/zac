@@ -5,9 +5,15 @@ mod utils;
 
 use clap::{ArgGroup, CommandFactory, Parser};
 
+#[cfg(feature = "pb")]
+const CMD_NAME: &str = "zacpb";
+
+#[cfg(not(feature = "pb"))]
+const CMD_NAME: &str = "zac";
+
 #[derive(Parser)]
 #[command(
-    name="zac",
+    name = CMD_NAME,
     version,
     about = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具",
     long_about = None,
