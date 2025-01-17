@@ -11,7 +11,6 @@ use reqwest_cookie_store::CookieStoreMutex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::Write;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -343,7 +342,7 @@ impl Session {
                 ))
                 .send()?;
             let json: Value = res.json()?;
-
+            println!("{:?}", json);
             let activities = json["activities"].as_array().unwrap();
 
             for activity in activities {
@@ -416,7 +415,10 @@ impl Session {
                 let mut retries = 0;
                 let url;
                 loop {
-                    let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json()?;
+                    let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
+                        error!("json失败：{}", e);
+                        Err(e)
+                    })?;
 
                     if json["status"].as_str().unwrap() == "ready" {
                         url = json["url"].as_str().unwrap().to_string();
@@ -440,35 +442,34 @@ impl Session {
             }
         };
 
-        let res = self.get(&download_url).send()?;
+        let mut  res = self.get(&download_url).send()?;
 
         fs::create_dir_all(std::path::Path::new(path_download))?;
 
         // 修改文件名的拓展名与下载链接一致
-        let file_name = match is_pdf {
-            true => {
-                let extension = std::path::Path::new(&download_url)
-                    .extension()
-                    .unwrap()
-                    .to_str()
-                    .unwrap();
-                std::path::Path::new(name)
-                    .with_extension(extension)
-                    .to_string_lossy()
-                    .to_string()
-            }
-            false => name.to_string(),
+        let file_name = if is_pdf {
+            let extension = std::path::Path::new(&download_url)
+                .extension()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            std::path::Path::new(name)
+                .with_extension(extension)
+                .to_string_lossy()
+                .to_string()
+        } else {
+            name.to_string()
         };
 
         let mut file = File::create(std::path::Path::new(path_download).join(&file_name))?;
-        let content = res.bytes()?;
-        file.write_all(&content)?;
 
-        success!(
-            "{} -> {}",
-            file_name,
-            path_download.display()
-        );
+        // 流式下载，避免大文件问题
+        res.copy_to(&mut file).map_err(|e| {
+            error!("下载失败：{}", e);
+            e
+        })?;
+        
+        success!("{} -> {}", file_name, path_download.display());
         Ok(())
     }
 }

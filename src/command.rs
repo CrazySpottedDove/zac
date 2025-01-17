@@ -438,7 +438,9 @@ pub fn config() {
                         println!("取消选择学期");
                     }
                 }
-
+                if selected_courses.is_empty() {
+                    continue;
+                }
                 try_or_log!(
                     network::Session::store_selected_courses(
                         &config.selected_courses,

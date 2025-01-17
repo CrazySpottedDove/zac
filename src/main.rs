@@ -9,7 +9,7 @@ use clap::{ArgGroup, CommandFactory, Parser};
 #[command(
     name="zac",
     version,
-    about,
+    about = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具",
     long_about = None,
     group(
         ArgGroup::new("commands")
@@ -44,21 +44,35 @@ fn main() {
     } else if cli.config {
         command::config();
     } else {
-        println!("您已进入交互模式！");
+        process!("交互模式");
         Cli::command().print_help().unwrap();
         loop {
             println!("请输入命令 (fetch|f, submit|s, upgrade|u, config|c) 或 exit|q 退出:");
             let mut input = String::new();
-            std::io::stdin().read_line(&mut input).expect("读取输入失败");
+            std::io::stdin()
+                .read_line(&mut input)
+                .expect("读取输入失败");
             let input = input.trim();
 
             match input {
-                "fetch"|"f" => { command::fetch(); },
-                "submit"|"s" => { command::submit(); },
-                "upgrade"|"u" => { command::upgrade(); },
-                "config"|"c"=> { command::config(); },
-                "exit"|"q" => { break; },
-                _ => { println!("无效命令，请重新输入。"); },
+                "fetch" | "f" => {
+                    command::fetch();
+                }
+                "submit" | "s" => {
+                    command::submit();
+                }
+                "upgrade" | "u" => {
+                    command::upgrade();
+                }
+                "config" | "c" => {
+                    command::config();
+                }
+                "exit" | "q" => {
+                    break;
+                }
+                _ => {
+                    warning!("无效命令，请重新输入");
+                }
             }
         }
     }
