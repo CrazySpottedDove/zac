@@ -54,6 +54,20 @@ macro_rules! try_or_log {
     };
 }
 
+/// 成功返回值，失败崩溃
+#[macro_export]
+macro_rules! try_or_exit {
+    ($expr:expr, $err_msg:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => {
+                error!("{}：{}", $err_msg, e);
+                std::process::exit(1);
+            }
+        }
+    };
+}
+
 /// 获取配置文件路径!
 fn get_config_path() -> Result<PathBuf>{
     use std::env::var;
@@ -83,13 +97,13 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// 读取设置文件!
+    /// 读取配置文件!
     pub fn load(path_settings: &PathBuf) -> Result<Settings> {
         let data = fs::read_to_string(path_settings)?;
         let settings: Settings = serde_json::from_str(&data)?;
 
         #[cfg(debug_assertions)]
-        success!("读取设置文件");
+        success!("读取配置文件");
 
         Ok(settings)
     }

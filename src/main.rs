@@ -1,5 +1,7 @@
 mod account;
-mod command;
+mod check_up;
+mod command_async;
+mod command_blocking;
 mod network;
 mod utils;
 
@@ -33,27 +35,35 @@ struct Cli {
     /// 一般在升学期时用，更新课程列表
     #[arg(short, long)]
     upgrade: bool,
+    /// 选择需要拉取的课程
+    #[arg(short, long)]
+    which: bool,
     /// 配置用户，存储目录，是否 ppt 转 pdf
     #[arg(short, long)]
     config: bool,
 }
 
 fn main() {
+    let (config, mut settings, mut accounts, default_account) = check_up::all_up();
     let cli = Cli::parse();
 
     if cli.fetch {
-        command::fetch();
+        command_blocking::fetch(&config, &settings, &default_account);
     } else if cli.submit {
-        command::submit();
+        command_blocking::submit();
     } else if cli.upgrade {
-        command::upgrade();
+        command_blocking::upgrade(&config, &default_account);
+    } else if cli.which {
+        command_blocking::which(&config);
     } else if cli.config {
-        command::config();
+        command_blocking::config(&config, &mut settings, &mut accounts);
     } else {
+        let mut pre_login_thread_wrapper = Some(command_async::pre_login(default_account));
+        let mut new_session = None;
         process!("交互模式");
         Cli::command().print_help().unwrap();
         loop {
-            process!("输入命令 (fetch|f, submit|s, upgrade|u, config|c) | (exit|q) 退出");
+            process!("输入命令 (fetch|f, submit|s, upgrade|u, which|w, config|c, help|h) | (exit|q) 退出");
             let mut input = String::new();
             std::io::stdin()
                 .read_line(&mut input)
@@ -62,19 +72,35 @@ fn main() {
 
             match input {
                 "fetch" | "f" => {
-                    command::fetch();
+                    let session = new_session.get_or_insert_with(|| {
+                        // 取出 pre_login_thread 中的 JoinHandle（只取一次）
+                        let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
+                        handle.join().unwrap()
+                    });
+                    command_async::fetch(&config, &settings, session);
                 }
                 "submit" | "s" => {
-                    command::submit();
+                    command_async::submit();
                 }
                 "upgrade" | "u" => {
-                    command::upgrade();
+                    let session = new_session.get_or_insert_with(|| {
+                        // 取出 pre_login_thread 中的 JoinHandle（只取一次）
+                        let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
+                        handle.join().unwrap()
+                    });
+                    command_async::upgrade(&config, session);
                 }
                 "config" | "c" => {
-                    command::config();
+                    command_async::config(&config, &mut settings, &mut accounts);
+                }
+                "which" | "w" => {
+                    command_async::which(&config);
                 }
                 "exit" | "q" => {
                     break;
+                }
+                "help" | "h" => {
+                    Cli::command().print_help().unwrap();
                 }
                 _ => {
                     warning!("无效命令，请重新输入");

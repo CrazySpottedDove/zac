@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "pb")]
 use {
+    colored::*,
     indicatif::{MultiProgress, ProgressBar, ProgressStyle},
     std::io::{Read, Write},
-    colored::*,
 };
 
 fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
@@ -148,13 +148,17 @@ impl Session {
             .default_headers(headers)
             .build()?;
 
+        #[cfg(debug_assertions)]
         success!("建立会话");
+
         Ok(Session { state, client })
     }
 
     /// 登录!
     pub fn login(&self, account: &account::Account) -> Result<()> {
+        #[cfg(debug_assertions)]
         process!("登录……");
+
         let login_url = "https://zjuam.zju.edu.cn/cas/login";
         let res = self.client.get(login_url).send()?;
         let text = res.text()?;
@@ -187,6 +191,7 @@ impl Session {
         ];
         let res = self.client.post(login_url).form(&params).send()?;
         if res.status().is_success() {
+            #[cfg(debug_assertions)]
             success!("登录");
             Ok(())
         } else {
@@ -433,7 +438,7 @@ impl Session {
                 .filter_map(|(semester, course_name, upload_id, file_name)| {
                     let pb = multi_pb.add(ProgressBar::new(0));
                     pb.set_style(pb_style.clone());
-                    pb.set_message(format!("{} {}","⚙".blue() ,file_name));
+                    pb.set_message(format!("{} {}", "⚙".blue(), file_name));
                     match Session::download_upload(
                         self,
                         &path_download.join(semester).join(course_name),
