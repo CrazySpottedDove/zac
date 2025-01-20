@@ -1,7 +1,6 @@
-use crate::{account, command_blocking, error, network, process, try_or_exit, utils, warning};
+use crate::{account, begin, command_blocking, completer, end, error, network, process, try_or_exit, utils, warning};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::io::Write;
 
 #[cfg(debug_assertions)]
 use crate::success;
@@ -17,15 +16,10 @@ pub fn config_up() -> (utils::Config, utils::Settings) {
 
      // 处理没设置存储目录的情况
     if settings.storage_dir == PathBuf::new() {
-        warning!("未设置存储目录 => 设置存储目录");
-        print!("请输入存储目录：");
-        std::io::stdout().flush().unwrap();
-        let mut storage_dir = String::new();
-
-        try_or_exit!(std::io::stdin().read_line(&mut storage_dir), "读取存储目录");
+        let storage_dir = completer::readin_storage_dir();
 
         try_or_exit!(
-            utils::Settings::set_storage_dir(&mut settings, &config.settings, &storage_dir.trim()),
+            utils::Settings::set_storage_dir(&mut settings, &config.settings, &storage_dir),
             "设置存储目录"
         );
     }
@@ -90,11 +84,12 @@ pub fn course_up(
     // 处理课程列表为空的情况
     if semester_course_map.is_empty() {
         warning!("无 学期->课程 映射表 => 获取学期课程列表");
+        begin!("获取学期课程列表");
         let session = try_or_exit!(network::Session::try_new(), "建立会话");
 
         try_or_exit!(session.login(default_account), "登录");
 
-        let semester_map = try_or_exit!(session.get_semester_map(), "获取学期引射表");
+        let semester_map = try_or_exit!(session.get_semester_map(), "获取学期映射表");
 
         let course_list = try_or_exit!(session.get_course_list(), "获取课程列表");
 
@@ -102,6 +97,7 @@ pub fn course_up(
             network::Session::store_semester_course_map(&config.courses, course_list, semester_map),
             "存储 学期->课程 映射表"
         );
+        end!("获取学期课程列表");
 
     }
 
@@ -123,8 +119,12 @@ pub fn after_change_default_account(
     default_account: &account::Account,
 ) -> network::Session {
     process!("更换用户 => 更新 学期->课程 映射表与已选课程");
+
+    begin!("登录");
     let new_session = try_or_exit!(network::Session::try_new(), "建立会话");
     try_or_exit!(new_session.login(default_account), "登录");
+    end!("登录");
+
     let semester_map = try_or_exit!(new_session.get_semester_map(), "获取学期映射表");
 
     let course_list = try_or_exit!(new_session.get_course_list(), "获取课程列表");

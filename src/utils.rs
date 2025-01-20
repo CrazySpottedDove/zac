@@ -1,9 +1,12 @@
 use crate::{account, network};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use anyhow::Result;
 
+pub const SELECT_PROMPT: &str = "↑/↓ 选择 | Enter 确认 | Esc 退出";
+pub const MULTISELECT_PROMPT: &str = "↑/↓ 选择 | Space 选中 | Enter 确认 | Esc 退出";
+pub const MAX_RETRIES : u64 = 3;
 /// 成功信息打印
 #[macro_export]
 macro_rules! success {
@@ -40,6 +43,33 @@ macro_rules! process {
     })
 }
 
+/// 需等待进程提示
+#[macro_export]
+macro_rules! waiting {
+    ($($arg:tt)*) => ({
+        println!("{} {}……","⌛" ,format!($($arg)*));
+    })
+}
+
+#[macro_export]
+macro_rules! begin {
+    ($($arg:tt)*) => ({
+        use std::io::Write;
+        print!("{} {}","⌛" ,format!($($arg)*));
+        std::io::stdout().flush().unwrap();
+    })
+}
+
+#[macro_export]
+macro_rules! end {
+    ($($arg:tt)*) => ({
+        use colored::*;
+        use std::io::Write;
+        print!("\r{} {}\n","✓".green() ,format!($($arg)*));
+        std::io::stdout().flush().unwrap();
+    })
+}
+
 /// 成功返回值，失败报 error
 #[macro_export]
 macro_rules! try_or_log {
@@ -49,6 +79,19 @@ macro_rules! try_or_log {
             Err(e) => {
                 error!("{}：{}", $err_msg, e);
                 return;
+            }
+        }
+    };
+}
+
+/// 成功返回值，失败报 error
+#[macro_export]
+macro_rules! try_or_throw {
+    ($expr:expr, $err_msg:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => {
+                return Err(anyhow::anyhow!("{}：{}", $err_msg, e));
             }
         }
     };
@@ -69,7 +112,7 @@ macro_rules! try_or_exit {
 }
 
 /// 获取配置文件路径!
-fn get_config_path() -> Result<PathBuf>{
+fn get_config_path() -> Result<PathBuf> {
     use std::env::var;
 
     #[cfg(target_os = "linux")]
@@ -90,13 +133,28 @@ fn get_config_path() -> Result<PathBuf>{
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub user: String,
     pub storage_dir: PathBuf,
     pub is_pdf: bool,
+    pub mp4_trashed: bool,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Settings::default()
+    }
+}
 impl Settings {
+    fn default() -> Self {
+        Settings {
+            user: String::new(),
+            storage_dir: PathBuf::from(""),
+            is_pdf: false,
+            mp4_trashed: false,
+        }
+    }
     /// 读取配置文件!
     pub fn load(path_settings: &PathBuf) -> Result<Settings> {
         let data = fs::read_to_string(path_settings)?;
@@ -109,11 +167,7 @@ impl Settings {
     }
 
     /// 设置默认用户!
-    pub fn set_default_user(
-        &mut self,
-        path_settings: &PathBuf,
-        user: &str,
-    ) -> Result<()> {
+    pub fn set_default_user(&mut self, path_settings: &PathBuf, user: &str) -> Result<()> {
         self.user = user.into();
 
         let json = serde_json::to_string(self)?;
@@ -129,11 +183,7 @@ impl Settings {
     }
 
     /// 设置存储目录!
-    pub fn set_storage_dir(
-        &mut self,
-        path_settings: &PathBuf,
-        storage_dir: &str,
-    ) -> Result<()> {
+    pub fn set_storage_dir(&mut self, path_settings: &PathBuf, storage_dir: &str) -> Result<()> {
         self.storage_dir = PathBuf::from(storage_dir);
 
         let json = serde_json::to_string(self)?;
@@ -149,11 +199,7 @@ impl Settings {
     }
 
     /// 设置下载 ppt 文件格式!
-    pub fn set_is_pdf(
-        &mut self,
-        path_settings: &PathBuf,
-        is_pdf: bool,
-    ) -> Result<()> {
+    pub fn set_is_pdf(&mut self, path_settings: &PathBuf, is_pdf: bool) -> Result<()> {
         self.is_pdf = is_pdf;
 
         let json = serde_json::to_string(self)?;
@@ -167,6 +213,22 @@ impl Settings {
 
         Ok(())
     }
+
+    pub fn set_mp4_trashed(&mut self, path_settings: &PathBuf, mp4_trashed: bool) -> Result<()> {
+        self.mp4_trashed = mp4_trashed;
+        let json = serde_json::to_string(self)?;
+        fs::write(path_settings, json)?;
+
+        success!("跳过下载 mp4 文件：{}", mp4_trashed);
+
+        Ok(())
+    }
+
+    pub fn list(&self) -> Result<()> {
+        let json = serde_json::to_string(self)?;
+        println!("{}", json);
+        Ok(())
+    }
 }
 
 pub struct Config {
@@ -175,7 +237,6 @@ pub struct Config {
     pub courses: PathBuf,
     pub selected_courses: PathBuf,
     pub activity_upload_record: PathBuf,
-    // pub cookies: PathBuf,
 }
 
 impl Config {
@@ -206,7 +267,6 @@ impl Config {
         if !activity_upload_record.exists() {
             Config::activity_upload_record_init(&activity_upload_record)?;
         }
-        // let cookies = config_path.join("cookies.json");
 
         Ok(Config {
             accounts,
@@ -229,11 +289,7 @@ impl Config {
 
     /// 初始化设置文件!
     fn settings_init(path_settings: &PathBuf) -> Result<()> {
-        let settings = Settings {
-            user: String::new(),
-            storage_dir: PathBuf::from(""),
-            is_pdf: false,
-        };
+        let settings = Settings::default();
         let json = serde_json::to_string(&settings)?;
         fs::write(path_settings, json)?;
 
@@ -257,10 +313,7 @@ impl Config {
         let json = serde_json::to_string(&selected_courses)?;
         fs::write(path_selected_courses, json)?;
 
-        success!(
-            "初始化已选课程文件 -> {}",
-            path_selected_courses.display()
-        );
+        success!("初始化已选课程文件 -> {}", path_selected_courses.display());
         Ok(())
     }
 

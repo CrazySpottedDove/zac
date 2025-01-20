@@ -1,16 +1,19 @@
-use crate::{account, error, process, success, warning};
+use crate::{account, error, process, success, try_or_exit, utils, waiting, warning,begin,end};
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
 use cookie_store::CookieStore;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use reqwest::blocking::multipart;
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, USER_AGENT};
 use reqwest_cookie_store::CookieStoreMutex;
+use serde_json::json;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::io::Read;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,7 +22,7 @@ use std::sync::Arc;
 use {
     colored::*,
     indicatif::{MultiProgress, ProgressBar, ProgressStyle},
-    std::io::{Read, Write},
+    std::io::Write,
 };
 
 fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
@@ -39,37 +42,10 @@ fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
 
 #[derive(Debug)]
 struct State {
-    // path_cookies: PathBuf,
     cookie_store: Arc<CookieStoreMutex>,
 }
 
 impl State {
-    // pub fn try_new(path_cookies: PathBuf) -> anyhow::Result<State> {
-    //     let cookie_store = match File::open(&path_cookies) {
-    //         Ok(f) => CookieStore::load_json(BufReader::new(f)).map_err(|e| {
-    //             let context = format!("error when read cookies from {}", path_cookies.display());
-    //             anyhow::anyhow!("{}", e).context(context)
-    //         })?,
-    //         Err(e) => {
-    //             warning!(
-    //                 "open {} failed. error: {}, use default empty cookie store",
-    //                 path_cookies.display(),
-    //                 e
-    //             );
-    //             CookieStore::default()
-    //         }
-    //     };
-    //     // // 打印所有加载的 Cookie
-    //     // {
-    //     //     println!("加载的 Cookie：{:?}", cookie_store);
-    //     // }
-    //     let cookie_store = Arc::new(CookieStoreMutex::new(cookie_store));
-    //     Ok(State {
-    //         path_cookies,
-    //         cookie_store,
-    //     })
-    // }
-
     /// 建立新的 cookie_store
     pub fn try_new() -> anyhow::Result<State> {
         let cookie_store = Arc::new(CookieStoreMutex::new(CookieStore::default()));
@@ -77,34 +53,7 @@ impl State {
     }
 }
 
-// impl Drop for State {
-//     fn drop(&mut self) {
-//         let mut file = match fs::OpenOptions::new()
-//             .write(true)
-//             .create(true)
-//             .truncate(true)
-//             .open(&self.path_cookies)
-//         {
-//             Ok(f) => f,
-//             Err(e) => {
-//                 error!(
-//                     "open {} for write failed. error: {}",
-//                     self.path_cookies.display(),
-//                     e
-//                 );
-//                 return;
-//             }
-//         };
-//         let store = self.cookie_store.lock().unwrap();
-//         if let Err(e) = store.save_json(&mut file) {
-//             error!(
-//                 "save cookies to path {} failed. error: {}",
-//                 self.path_cookies.display(),
-//                 e
-//             );
-//         }
-//     }
-// }
+
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -114,23 +63,6 @@ pub struct Session {
 }
 
 impl Session {
-    //  pub fn try_new(path_cookies: PathBuf) -> anyhow::Result<Session> {
-    //     let state = State::try_new()?;
-    //     let state = Arc::new(state);
-    //     let mut headers = HeaderMap::new();
-    //     headers.insert(
-    //         USER_AGENT,
-    //         "Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0"
-    //             .parse()
-    //             .unwrap(),
-    //     );
-    //     let client = Client::builder()
-    //         .cookie_provider(state.cookie_store.clone())
-    //         .default_headers(headers)
-    //         .build()?;
-    //     Ok(Session { state, client })
-    // }
-
     /// 建立新的会话!
     pub fn try_new() -> Result<Session> {
         let state = State::try_new()?;
@@ -146,6 +78,7 @@ impl Session {
         let client = Client::builder()
             .cookie_provider(state.cookie_store.clone())
             .default_headers(headers)
+            .timeout(std::time::Duration::from_secs(1200))
             .build()?;
 
         #[cfg(debug_assertions)]
@@ -156,11 +89,8 @@ impl Session {
 
     /// 登录!
     pub fn login(&self, account: &account::Account) -> Result<()> {
-        #[cfg(debug_assertions)]
-        process!("登录……");
-
-        let login_url = "https://zjuam.zju.edu.cn/cas/login";
-        let res = self.client.get(login_url).send()?;
+        const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
+        let res = self.client.get(LOGIN_URL).send()?;
         let text = res.text()?;
         let re =
             regex::Regex::new(r#"<input type="hidden" name="execution" value="(.*?)" />"#).unwrap();
@@ -189,10 +119,9 @@ impl Session {
             ("_eventId", "submit"),
             ("authcode", ""),
         ];
-        let res = self.client.post(login_url).form(&params).send()?;
+        let res = self.client.post(LOGIN_URL).form(&params).send()?;
         if res.status().is_success() {
-            #[cfg(debug_assertions)]
-            success!("登录");
+            self.get("https://courses.zju.edu.cn/user/courses").send()?;
             Ok(())
         } else {
             let status = res.status();
@@ -269,6 +198,7 @@ impl Session {
             serde_json::to_string(&semester_course_map).unwrap(),
         )?;
 
+        #[cfg(debug_assertions)]
         success!("存储 学期->课程 映射表");
         Ok(())
     }
@@ -280,7 +210,6 @@ impl Session {
         let data = fs::read_to_string(path_courses)?;
         let semester_course_map: HashMap<String, Vec<CourseData>> = serde_json::from_str(&data)?;
 
-        success!("加载 学期->课程 映射表");
         Ok(semester_course_map)
     }
 
@@ -294,6 +223,7 @@ impl Session {
             serde_json::to_string(selected_courses)?,
         )?;
 
+        #[cfg(debug_assertions)]
         success!("存储已选课程");
         Ok(())
     }
@@ -303,7 +233,9 @@ impl Session {
         let data = fs::read_to_string(path_selected_courses)?;
         let selected_courses: Vec<CourseFull> = serde_json::from_str(&data)?;
 
+        #[cfg(debug_assertions)]
         success!("加载已选课程");
+
         Ok(selected_courses)
     }
 
@@ -329,41 +261,44 @@ impl Session {
         let data = fs::read_to_string(path_activity_upload_record)?;
         let activity_upload_record: Vec<u64> = serde_json::from_str(&data)?;
 
+        #[cfg(debug_assertions)]
         success!("加载已下载课件记录");
+
         Ok(activity_upload_record)
     }
 
     /// 拉取活动！
-    fn fetch_activities(&self, selected_course: &CourseFull) -> Result<Vec<Value>> {
-        const MAX_RETRIES: usize = 3;
+    fn fetch_activities(&self, course_id: u64, course_name: &str) -> Result<Vec<Value>> {
         let url = format!(
             "https://courses.zju.edu.cn/api/courses/{}/activities",
-            selected_course.id
+            course_id
         );
-        for attempt in 1..=MAX_RETRIES {
+        for attempt in 1..=utils::MAX_RETRIES {
             match self.client.get(&url).send() {
                 Ok(res) => match res.json::<Value>() {
                     Ok(json) => {
                         if let Some(activities) = json["activities"].as_array() {
                             #[cfg(debug_assertions)]
-                            success!("{}::activities", selected_course.name.trim());
+                            success!("{}::activities", course_name.trim());
 
                             return Ok(activities.clone());
                         } else {
+                            println!("{:#?}", json);
                             warning!(
                                 "retry {}/{}: {} 的返回 json 无 activities 字段",
                                 attempt,
-                                MAX_RETRIES,
-                                selected_course.name
+                                utils::MAX_RETRIES,
+                                course_name
                             );
                         }
                     }
                     Err(e) => {
+                        #[cfg(debug_assertions)]
                         warning!(
                             "retry {}/{}: {} 的返回无法解析为 json: {}",
                             attempt,
-                            MAX_RETRIES,
-                            selected_course.name,
+                            utils::MAX_RETRIES,
+                            course_name,
                             e
                         );
                     }
@@ -372,14 +307,99 @@ impl Session {
                     warning!(
                         "retry {}/{}: {} 的请求失败: {}",
                         attempt,
-                        MAX_RETRIES,
-                        selected_course.name,
+                        utils::MAX_RETRIES,
+                        course_name,
                         e
                     );
                 }
             }
         }
-        Err(anyhow!("{} 的请求失败", selected_course.name))
+        Err(anyhow!("{} 的请求失败", course_name))
+    }
+
+    /// 拉取下载任务！
+    fn fetch_download_tasks(&self, selected_courses: Vec<CourseFull>, activity_upload_record: &Vec<u64>, settings: &utils::Settings) -> Result<Vec<(String, String, u64, String)>> {
+        #[cfg(debug_assertions)]
+        let start = std::time::Instant::now();
+
+        let num = selected_courses.len();
+        let pool = ThreadPoolBuilder::new().num_threads(num).build()?;
+
+        // 使用线程池执行并行操作
+        let tasks: Vec<(String, String, u64, String)> = pool.install(|| {
+            selected_courses
+                .par_iter()
+                .filter_map(|selected_course| {
+                    // 尝试获取活动列表，如果失败则记录错误并跳过此课程
+                    let activities =
+                        match self.fetch_activities(selected_course.id, &selected_course.name) {
+                            Ok(acts) => acts,
+                            Err(e) => {
+                                error!("拉取课程的 activities：{}", e);
+                                return None;
+                            }
+                        };
+
+                    let mut local_tasks = Vec::new();
+
+                    for activity in activities {
+                        // 确保活动包含上传信息，否则跳过
+                        let uploads = match activity["uploads"].as_array() {
+                            Some(arr) => arr,
+                            None => continue,
+                        };
+
+                        for upload in uploads {
+                            // 提取 reference_id，如果不存在则跳过
+                            let id = match upload["reference_id"].as_u64() {
+                                Some(id) => id,
+                                None => continue,
+                            };
+
+                            // 跳过已记录的上传
+                            if activity_upload_record.contains(&id) {
+                                continue;
+                            }
+
+                            // 提取文件名
+                            let name = upload["name"].as_str().unwrap_or("unnamed").to_string();
+
+                            // 提取并小写化文件扩展名
+                            let extension = PathBuf::from(&name)
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+
+                            // 根据设置决定是否跳过 mp4 文件
+                            if settings.mp4_trashed && extension == "mp4" {
+                                continue;
+                            }
+
+                            local_tasks.push((
+                                selected_course.semester.clone(),
+                                selected_course.name.clone(),
+                                id,
+                                name,
+                            ));
+                        }
+                    }
+
+                    // 如果没有任务，则返回 None，否则返回任务列表
+                    if local_tasks.is_empty() {
+                        None
+                    } else {
+                        Some(local_tasks)
+                    }
+                })
+                .flatten()
+                .collect()
+        });
+
+        #[cfg(debug_assertions)]
+        println!("fetch_activities: {:?}", start.elapsed());
+
+        Ok(tasks)
     }
 
     /// 拉取新课件！
@@ -390,38 +410,18 @@ impl Session {
         path_activity_upload_record: &PathBuf,
         selected_courses: Vec<CourseFull>,
         mut activity_upload_record: Vec<u64>,
-        is_pdf: bool,
+        settings: &utils::Settings,
     ) -> Result<()> {
-        process!("拉取新课件……");
-        let mut tasks = Vec::new();
-
-        for selected_course in selected_courses {
-            let activities = self.fetch_activities(&selected_course)?;
-
-            for activity in activities {
-                let uploads = activity["uploads"].as_array().unwrap();
-                for upload in uploads {
-                    if let Some(id) = upload["reference_id"].as_u64() {
-                        if activity_upload_record.contains(&id) {
-                            continue;
-                        }
-                        let name = upload["name"].as_str().unwrap_or("unnamed").to_string();
-                        tasks.push((
-                            selected_course.semester.clone(),
-                            selected_course.name.clone(),
-                            id,
-                            name,
-                        ));
-                    }
-                }
-            }
-        }
+        begin!("更新课件信息");
+        let tasks = self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
 
         if tasks.is_empty() {
             warning!("没有新课件");
             return Ok(());
         }
+        end!("更新课件信息");
 
+        waiting!("拉取新课件");
         let multi_pb = Arc::new(MultiProgress::new());
         // 进度条样式
         let pb_style = ProgressStyle::with_template(
@@ -444,7 +444,7 @@ impl Session {
                         &path_download.join(semester).join(course_name),
                         *upload_id,
                         file_name,
-                        is_pdf,
+                        settings.is_pdf,
                         pb,
                     ) {
                         Ok(_) => Some(*upload_id),
@@ -456,7 +456,6 @@ impl Session {
                 })
                 .collect();
             if !successful_uploads.is_empty() {
-                success!("拉取新课件");
                 activity_upload_record.extend(successful_uploads);
                 match Session::store_activity_upload_record(
                     path_activity_upload_record,
@@ -565,39 +564,22 @@ impl Session {
         path_activity_upload_record: &PathBuf,
         selected_courses: Vec<CourseFull>,
         mut activity_upload_record: Vec<u64>,
-        is_pdf: bool,
+        settings: &utils::Settings,
     ) -> Result<()> {
-        process!("拉取新课件……");
-        let mut tasks = Vec::new();
 
-        for selected_course in selected_courses {
-            let activities = self.fetch_activities(&selected_course)?;
 
-            for activity in activities {
-                let uploads = activity["uploads"].as_array().unwrap();
-                for upload in uploads {
-                    if let Some(id) = upload["reference_id"].as_u64() {
-                        if activity_upload_record.contains(&id) {
-                            continue;
-                        }
-                        let name = upload["name"].as_str().unwrap_or("unnamed").to_string();
-                        tasks.push((
-                            selected_course.semester.clone(),
-                            selected_course.name.clone(),
-                            id,
-                            name,
-                        ));
-                    }
-                }
-            }
-        }
+
+        begin!("更新课件信息");
+        let tasks = self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
 
         if tasks.is_empty() {
             warning!("没有新课件");
             return Ok(());
         }
+        end!("更新课件信息");
 
         // 用自定义线程池将并发限制为 4
+        waiting!("拉取新课件");
         let pool = ThreadPoolBuilder::new().num_threads(4).build()?;
         pool.install(|| {
             let successful_uploads: Vec<u64> = tasks
@@ -606,12 +588,11 @@ impl Session {
                     #[cfg(debug_assertions)]
                     process!("{} :: {}", course_name, file_name);
 
-                    match Session::download_upload(
-                        self,
+                    match self.download_upload(
                         &path_download.join(semester).join(course_name),
                         *upload_id,
                         file_name,
-                        is_pdf,
+                        settings.is_pdf,
                     ) {
                         Ok(_) => Some(*upload_id),
                         Err(e) => {
@@ -704,6 +685,255 @@ impl Session {
         success!("{} -> {}", file_name, path_download.display());
         Ok(())
     }
+
+    /// 上传文件到个人资料库
+    pub fn upload_file(&self, file_path: &PathBuf) -> Result<u64> {
+        #[cfg(debug_assertions)]
+        process!("上传文件：{}", file_path.display());
+
+        let file_name = file_path.file_name().unwrap().to_str().unwrap();
+        let file_size = file_path.metadata().unwrap().len();
+        let payload = json!({
+            "embed_material_type": "",
+            "is_marked_attachment": false,
+            "is_scorm": false,
+            "is_wmpkg": false,
+            "name": file_name,
+            "parent_id": 0,
+            "parent_type": null,
+            "size": file_size,
+            "source": ""
+        });
+        const POST_URL: &str = "https://courses.zju.edu.cn/api/uploads";
+        #[cfg(debug_assertions)]
+        process!("已准备好发送上传请求");
+
+        let mut res;
+        let mut json: Option<Value> = None; // 使用 Option 包装
+
+        for attempt in 1..=utils::MAX_RETRIES {
+            res = self.client.post(POST_URL).json(&payload).send()?;
+            let content = res.text()?;
+            match serde_json::from_str::<Value>(&content) {
+                Ok(json_unjudged) => {
+                    #[cfg(debug_assertions)]
+                    println!("POST response as JSON: {:#?}", json_unjudged);
+                    if json_unjudged["errors"].is_object() {
+                        error!("雪灾浙大不支持{}的文件类型", file_name);
+                        return Ok(0);
+                    }
+                    json = Some(json_unjudged);
+                    break;
+                }
+                Err(_) => {
+                    #[cfg(debug_assertions)]
+                    warning!("POST attempt {}/{} Failed", attempt, utils::MAX_RETRIES);
+                }
+            }
+            #[cfg(debug_assertions)]
+            warning!("retry {}/{}: 上传请求失败", attempt, utils::MAX_RETRIES);
+        }
+
+        #[cfg(debug_assertions)]
+        process!("上传请求已被接受");
+        if json.is_none() {
+            error!("上传请求失败");
+            return Ok(0);
+        }
+
+        let json = json.unwrap(); // 断言 json 已被赋值
+
+        let upload_url = json["upload_url"].as_str().unwrap();
+        let id = json["id"].as_u64().unwrap();
+        #[cfg(debug_assertions)]
+        println!("Upload URL: {}", upload_url);
+
+        let mut file = File::open(file_path)?;
+        let mut file_content = Vec::new();
+        file.read_to_end(&mut file_content)?;
+        let file_name = json["name"].as_str().unwrap();
+
+        let file_part = multipart::Part::bytes(file_content)
+            .file_name(file_name.to_string())
+            .mime_str("application/octet-stream")?;
+
+        let form = multipart::Form::new().part("file", file_part);
+
+        let res = self.client.put(upload_url).multipart(form).send()?;
+
+        if res.status().is_success() {
+            #[cfg(debug_assertions)]
+            success!("上传文件");
+        } else {
+            let status = res.status();
+            let text = res.text().unwrap_or_default();
+            error!("上传状态码：{}，响应内容：{}", status, text);
+        }
+
+        Ok(id)
+    }
+
+    /// 获取作业列表
+    ///
+    /// homework: id, name, ddl, description
+    pub fn get_homework_list(&self, path_courses: &PathBuf) -> Result<Vec<Homework>> {
+        let semester_course_map = try_or_exit!(
+            Session::load_semester_course_map(path_courses),
+            "加载 学期->课程 映射表"
+        );
+        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+        let filtered_semester_list = filter_latest_group(&semester_list);
+
+        #[cfg(debug_assertions)]
+        process!("Filtered Semester List: {:?}", filtered_semester_list);
+        let courses : Vec<CourseData> = filtered_semester_list.iter().map(|semester| {
+            semester_course_map.get(semester).unwrap().clone()
+        }).flatten().collect();
+        let num = courses.len();
+        let pool = ThreadPoolBuilder::new().num_threads(num).build()?;
+        let all_homeworks :Vec<Homework> = pool.install(||{
+            courses.par_iter().filter_map(|course|{
+                let url = format!("https://courses.zju.edu.cn/api/courses/{}/homework-activities?page=1&page_size=100&reloadPage=false",course.id);
+                let mut homeworks:Vec<Homework> =Vec::new();
+                for attempt in 1..=utils::MAX_RETRIES{
+                    let session = self.clone();
+                    match session.client.get(&url).send(){
+                        Ok(res)=> {
+                            // let text = res.text().unwrap();
+                            // match serde_json::from_str::<Value>(&text){
+                            match res.json::<Value>(){
+                            Ok(json)=>{
+                                if let Some(homeworks_unwashed) = json["homework_activities"].as_array(){
+                                    #[cfg(debug_assertions)]
+                                    success!("{}::homeworks", course.name);
+                                    homeworks.extend(homeworks_unwashed
+                                        .iter()
+                                        .filter(|hw| hw["is_in_progress"].as_bool().unwrap())
+                                        .map(|hw| {
+                                            let description_html = hw["data"]["description"].as_str().unwrap_or("");
+                                            let description = html2text::from_read(description_html.as_bytes(), 80);
+                                            let id = hw["id"].as_u64().unwrap();
+                                            let ddl = format_ddl(hw["deadline"].as_str().unwrap());
+                                            let status = hw["submitted"].as_bool().unwrap();
+                                            use colored::Colorize;
+                                            let status_signal = if status {
+                                                "✓".green()
+                                            } else {
+                                                "!".yellow()
+                                            };
+                                            let ddl = if status{
+                                                ddl.green()
+                                            }else{
+                                                ddl.yellow()
+                                            };
+                                            let name = format!(
+                                                "{} {}::{}\n\t{}\n\t{}",
+                                                status_signal,
+                                                course.name,
+                                                hw["title"].as_str().unwrap(),
+                                                ddl,
+                                                description
+                                            );
+                                            Homework { id, name }
+                                        })
+                                        .collect::<Vec<Homework>>());
+                                    break;
+                                }
+                            },
+                            Err(e)=>{
+                                #[cfg(debug_assertions)]
+                                warning!(
+                                    "retry {}/{}: {} 的返回无法解析为 json: {}",
+                                    attempt,
+                                    utils::MAX_RETRIES,
+                                    course.name,
+                                    e
+                                );
+                            }
+                        }},
+                        Err(e) => {
+                            warning!(
+                                "retry {}/{}: {} 的请求失败: {}",
+                                attempt,
+                                utils::MAX_RETRIES,
+                                course.name,
+                                e
+                            );
+                        }
+                    }
+                }
+                if homeworks.is_empty(){
+                    None
+                }else{
+                    Some(homeworks)
+                }
+            }).flatten().collect()
+        });
+
+        Ok(all_homeworks)
+    }
+
+    /// 上交作业
+    pub fn handin_homework(
+        &self,
+        homework_id: u64,
+        file_id: u64,
+        mut comment: String,
+    ) -> Result<()> {
+        let handin_url = format!(
+            "https://courses.zju.edu.cn/api/course/activities/{}/submissions",
+            homework_id
+        );
+
+        if !comment.is_empty() {
+            comment = format!("<p>{}<br><br></p>", comment);
+        }
+        let payload = json!({
+            "comment":comment,
+            "is_draft":false,
+            "mode":"normal",
+            "other_resources":[],
+            "slides":[],
+            "uploads":[file_id],
+            "uploads_in_rich_text":[]
+        });
+        #[cfg(debug_assertions)]
+        process!("已准备好发送提交作业请求");
+
+        let mut res;
+        let mut json: Option<Value> = None; // 使用 Option 包装
+
+        for attempt in 1..=utils::MAX_RETRIES {
+            res = self.client.post(&handin_url).json(&payload).send()?;
+            let content = res.text()?;
+            match serde_json::from_str::<Value>(&content) {
+                Ok(json_unjudged) => {
+                    #[cfg(debug_assertions)]
+                    println!("SUBMIT POST response as JSON: {:#?}", json_unjudged);
+                    if json_unjudged["errors"].is_array() {
+                        error!("上交作业失败");
+                        return Ok(());
+                    }
+                    json = Some(json_unjudged);
+                    break;
+                }
+                Err(_) => {
+                    #[cfg(debug_assertions)]
+                    warning!("POST attempt {}/{} Failed", attempt, utils::MAX_RETRIES);
+                }
+            }
+            #[cfg(debug_assertions)]
+            warning!("retry {}/{}: 上传请求失败", attempt, utils::MAX_RETRIES);
+        }
+
+        #[cfg(debug_assertions)]
+        process!("上交作业请求已被接受");
+        if json.is_none() {
+            error!("上传作业失败");
+        }
+
+        Ok(())
+    }
 }
 
 impl Deref for Session {
@@ -730,4 +960,99 @@ pub struct CourseFull {
     pub id: u64,
     pub semester: String,
     pub name: String,
+}
+
+pub struct Homework {
+    pub id: u64,
+    pub name: String,
+}
+
+/// 拆分 "2024-2025春夏" => ("2024-2025", "春夏") 的辅助函数
+fn split_semester(semester: &str) -> Option<(&str, &str)> {
+    // 找到第一个出现的 '春', '夏', '秋', '冬', '短' 来分割
+    // 也可以直接通过一个固定规则：年-年前缀一般类似 "[数字]-[数字]"，剩下的就是后缀
+    // 这里为了简单，直接从第一个汉字处切割，实际可按需求改写
+    let chars: Vec<char> = semester.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        if "春夏秋冬短".contains(*c) {
+            // i 是后缀开始位置
+            return Some((&semester[..i], &semester[i..]));
+        }
+    }
+    None
+}
+
+/// 将「年-年前缀」解析为一个便于比较的整型，例如 "2024-2025" => (2024, 2025)
+fn parse_year_prefix(prefix: &str) -> u32 {
+    // 假设前缀必然是 "xxxx-yyyy" 的格式
+    let parts: Vec<&str> = prefix.split('-').collect();
+    return parts[0].parse().unwrap();
+}
+
+/// 给后缀定义自定义排序规则
+/// 返回 (group, subpriority) 来进行排序
+/// group 越大越靠前（同组内挨在一起），subpriority 越大越靠前
+fn suffix_order(suffix: &str) -> (u8, u8) {
+    match suffix {
+        // 春夏组 => 夏 > 春夏 > 春
+        "夏" => (2, 2),
+        "春夏" => (2, 1),
+        "春" => (2, 0),
+        // 秋冬组 => 冬 > 秋冬 > 秋
+        "冬" => (1, 2),
+        "秋冬" => (1, 1),
+        "秋" => (1, 0),
+        // 短 => 最后
+        "短" => (0, 0),
+        // 其它任意后缀
+        _ => (3, 0),
+    }
+}
+
+/// 根据已有的 split_semester, parse_year_prefix, suffix_order
+/// 返回：具备“最大年前缀”和“最大后缀group”的所有项，并按subpriority降序排列。
+fn filter_latest_group(semesters: &[String]) -> Vec<String> {
+    let mut parsed = Vec::new();
+    for sem in semesters {
+        if let Some((prefix, suffix)) = split_semester(sem) {
+            let year = parse_year_prefix(prefix); // 返回 u32
+            let (group, sub) = suffix_order(suffix); // 返回 (u8, u8)
+            parsed.push((sem.clone(), year, group, sub));
+        } else {
+            // 若无法拆分前缀或后缀，则视作year=0, group=0, sub=0
+            parsed.push((sem.clone(), 0, 0, 0));
+        }
+    }
+
+    // 1) 找出最大的年前缀
+    let max_year = parsed.iter().map(|(_, y, _, _)| *y).max().unwrap_or(0);
+    // 2) 只保留年前缀= max_year 的项目
+    let filtered: Vec<_> = parsed
+        .into_iter()
+        .filter(|(_, y, _, _)| *y == max_year)
+        .collect();
+
+    // 3) 在这些项目里，找出最大的 group
+    let max_group = filtered.iter().map(|(_, _, g, _)| *g).max().unwrap_or(0);
+    // 4) 只保留 group= max_group 的项目
+    let mut final_items: Vec<_> = filtered
+        .into_iter()
+        .filter(|(_, _, g, _)| *g == max_group)
+        .collect();
+
+    // 5) 按 subpriority 降序排序
+    final_items.sort_by(|a, b| b.3.cmp(&a.3));
+
+    // 返回原学期字符串
+    final_items.into_iter().map(|(s, _, _, _)| s).collect()
+}
+
+fn format_ddl(original_ddl: &str) -> String {
+    use chrono::{DateTime, Utc};
+    let time = DateTime::parse_from_rfc3339(original_ddl).unwrap();
+    let time_utc: DateTime<Utc> = time.with_timezone(&Utc);
+
+    let formatted_ddl = time_utc.format("ddl: %m-%d %H:%M %Y").to_string();
+
+    formatted_ddl
 }
