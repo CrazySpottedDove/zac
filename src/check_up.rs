@@ -85,7 +85,7 @@ pub fn course_up(
     if semester_course_map.is_empty() {
         warning!("无 学期->课程 映射表 => 获取学期课程列表");
         begin!("获取学期课程列表");
-        let session = try_or_exit!(network::Session::try_new(), "建立会话");
+        let session = try_or_exit!(network::Session::try_new(config.cookies.clone()), "建立会话");
 
         try_or_exit!(session.login(default_account), "登录");
 
@@ -121,7 +121,7 @@ pub fn after_change_default_account(
     process!("更换用户 => 更新 学期->课程 映射表与已选课程");
 
     begin!("登录");
-    let new_session = try_or_exit!(network::Session::try_new(), "建立会话");
+    let new_session = try_or_exit!(network::Session::try_new(config.cookies.clone()), "建立会话");
     try_or_exit!(new_session.login(default_account), "登录");
     end!("登录");
 

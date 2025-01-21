@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 pub const SELECT_PROMPT: &str = "↑/↓ 选择 | Enter 确认 | Esc 退出";
 pub const MULTISELECT_PROMPT: &str = "↑/↓ 选择 | Space 选中 | Enter 确认 | Esc 退出";
-pub const MAX_RETRIES : u64 = 3;
+pub const MAX_RETRIES: u64 = 3;
 /// 成功信息打印
 #[macro_export]
 macro_rules! success {
@@ -65,7 +65,10 @@ macro_rules! end {
     ($($arg:tt)*) => ({
         use colored::*;
         use std::io::Write;
+        #[cfg(not(debug_assertions))]
         print!("\r{} {}\n","✓".green() ,format!($($arg)*));
+        #[cfg(debug_assertions)]
+        print!("{} {}\n","✓".green() ,format!($($arg)*));
         std::io::stdout().flush().unwrap();
     })
 }
@@ -73,42 +76,79 @@ macro_rules! end {
 /// 成功返回值，失败报 error
 #[macro_export]
 macro_rules! try_or_log {
-    ($expr:expr, $err_msg:expr) => {
+    ($expr:expr, $msg:expr) => {{
+        #[cfg(debug_assertions)]
+        use std::time::Instant;
+
+        #[cfg(debug_assertions)]
+        let start = Instant::now();
         match $expr {
-            Ok(val) => val,
+            Ok(val) => {
+                #[cfg(debug_assertions)]
+                {
+                    let duration = start.elapsed();
+                    println!("{}: {:?}", $msg, duration);
+                }
+                val
+            }
             Err(e) => {
-                error!("{}：{}", $err_msg, e);
+                error!("{}：{}", $msg, e);
                 return;
             }
         }
-    };
+    }};
 }
 
 /// 成功返回值，失败报 error
 #[macro_export]
 macro_rules! try_or_throw {
-    ($expr:expr, $err_msg:expr) => {
+    ($expr:expr, $msg:expr) => {{
+        #[cfg(debug_assertions)]
+        use std::time::Instant;
+
+        #[cfg(debug_assertions)]
+        let start = Instant::now();
+
         match $expr {
-            Ok(val) => val,
+            Ok(val) => {
+                #[cfg(debug_assertions)]
+                {
+                    let duration = start.elapsed();
+                    println!("{}: {:?}", $msg, duration);
+                }
+                val
+            }
             Err(e) => {
-                return Err(anyhow::anyhow!("{}：{}", $err_msg, e));
+                return Err(anyhow::anyhow!("{}：{}", $msg, e));
             }
         }
-    };
+    }};
 }
 
 /// 成功返回值，失败崩溃
 #[macro_export]
 macro_rules! try_or_exit {
-    ($expr:expr, $err_msg:expr) => {
+    ($expr:expr, $msg:expr) => {{
+        #[cfg(debug_assertions)]
+        use std::time::Instant;
+
+        #[cfg(debug_assertions)]
+        let start = Instant::now();
         match $expr {
-            Ok(val) => val,
+            Ok(val) => {
+                #[cfg(debug_assertions)]
+                {
+                    let duration = start.elapsed();
+                    println!("{}: {:?}", $msg, duration);
+                }
+                val
+            }
             Err(e) => {
-                error!("{}：{}", $err_msg, e);
+                error!("{}：{}", $msg, e);
                 std::process::exit(1);
             }
         }
-    };
+    }};
 }
 
 /// 获取配置文件路径!
@@ -120,6 +160,9 @@ fn get_config_path() -> Result<PathBuf> {
 
     #[cfg(target_os = "windows")]
     let home_dir = var("USERPROFILE")?;
+
+    #[cfg(target_os = "macos")]
+    let home_dir = var("HOME")?;
 
     let config_path = PathBuf::from(home_dir).join(".zac");
     if !config_path.exists() {
@@ -237,6 +280,7 @@ pub struct Config {
     pub courses: PathBuf,
     pub selected_courses: PathBuf,
     pub activity_upload_record: PathBuf,
+    pub cookies: PathBuf,
 }
 
 impl Config {
@@ -268,20 +312,24 @@ impl Config {
             Config::activity_upload_record_init(&activity_upload_record)?;
         }
 
+        let cookies = config_path.join("cookies.json");
+        if !cookies.exists() {
+            Config::cookies_init(&cookies)?;
+        }
+
         Ok(Config {
             accounts,
             settings,
             courses,
             selected_courses,
             activity_upload_record,
+            cookies
         })
     }
 
     /// 初始化账号文件!
     fn accounts_init(path_accounts: &PathBuf) -> Result<()> {
-        let accounts = HashMap::<String, account::Account>::new();
-        let json = serde_json::to_string(&accounts)?;
-        fs::write(path_accounts, json)?;
+        fs::write(path_accounts, "{}")?;
 
         success!("账号初始化文件 -> {}", path_accounts.display());
         Ok(())
@@ -309,9 +357,7 @@ impl Config {
 
     /// 初始化已选课程文件!
     fn selected_courses_init(path_selected_courses: &PathBuf) -> Result<()> {
-        let selected_courses: Vec<network::CourseFull> = Vec::new();
-        let json = serde_json::to_string(&selected_courses)?;
-        fs::write(path_selected_courses, json)?;
+        fs::write(path_selected_courses, "[]")?;
 
         success!("初始化已选课程文件 -> {}", path_selected_courses.display());
         Ok(())
@@ -319,14 +365,18 @@ impl Config {
 
     /// 初始化课件记录文件!
     fn activity_upload_record_init(path_activity_upload_record: &PathBuf) -> Result<()> {
-        let activity_upload_record: Vec<u64> = Vec::new();
-        let json = serde_json::to_string(&activity_upload_record)?;
-        fs::write(path_activity_upload_record, json)?;
-
+        fs::write(path_activity_upload_record, "[]")?;
         success!(
             "已初始化课件记录文件 -> {}",
             path_activity_upload_record.display()
         );
+        Ok(())
+    }
+
+    /// 初始化 cookies 文件！
+    pub fn cookies_init(cookies: &PathBuf) -> Result<()> {
+        fs::write(cookies, "{}")?;
+        success!("初始化 cookies 文件 -> {}", cookies.display());
         Ok(())
     }
 }

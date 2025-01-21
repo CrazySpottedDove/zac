@@ -11,16 +11,23 @@ use std::io::Write;
 
 use anyhow::Result;
 use std::thread::{self, JoinHandle};
+
+
+
+
 pub fn fetch_core(
     config: &utils::Config,
     settings: &utils::Settings,
     session: &network::Session,
     selected_courses: Vec<network::CourseFull>,
 ) -> Result<()> {
+
+
     let activity_upload_record = try_or_throw!(
         network::Session::load_activity_upload_record(&config.activity_upload_record),
         "加载已下载课件记录"
     );
+
 
     try_or_throw!(
         session.fetch_activity_uploads(

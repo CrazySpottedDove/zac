@@ -72,7 +72,8 @@ Release中提供了构建好的 windows 版本和 linux 版本，其中带 pb �
 对于 linux 版本，首先确保你拥有 rustc， cargo，然后在项目根目录使用
 
 ```bash
-cargo build --release
+cargo build --release --features pb --target-dir target_linux_pb --bin zacpb
+cargo build --release --target-dir target_linux_no_pb --bin zac
 ```
 
 如果希望构建 windows 版本，则确保你拥有交叉编译工具 x86_64-w64-mingw32-gcc，并通过 rustup 添加目标 x86_64-pc-windows-gnu
@@ -87,7 +88,8 @@ rustup target add x86_64-pc-windows-gnu
 然后，在项目根目录使用
 
 ```bash
-cargo build --target x86_64-pc-windows-gnu --release
+cargo build --release --features pb --target-dir target_windows_pb --target x86_64-pc-windows-gnu --bin zacpb
+cargo build --release --target-dir target_windows_no_pb
 ```
 
 ## Known Issues
@@ -97,3 +99,5 @@ cargo build --target x86_64-pc-windows-gnu --release
 ```rust
 assertion failed: fd != u32::MAX as RawFd
 ```
+
+* zac 未购买 CA 签名，下载时可能被 defender 拦截，此为正常现象，请信任 zac（保留，加入白名单）。

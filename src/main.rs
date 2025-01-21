@@ -16,11 +16,17 @@ const CMD_NAME: &str = "zacpb";
 #[cfg(not(feature = "pb"))]
 const CMD_NAME: &str = "zac";
 
+#[cfg(feature = "pb")]
+const CMD_ABOUT: &str = "zacpb(zju-assistant-cli::progress-bar) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac";
+
+#[cfg(not(feature = "pb"))]
+const CMD_ABOUT: &str = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac";
+
 #[derive(Parser)]
 #[command(
     name = CMD_NAME,
     version,
-    about = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac",
+    about = CMD_ABOUT,
     long_about = None,
     group(
         ArgGroup::new("commands")
@@ -66,13 +72,13 @@ fn main() {
     }else if cli.config {
         command_blocking::config(&config, &mut settings, &mut accounts);
     } else {
-        let mut pre_login_thread_wrapper = Some(command_async::pre_login(default_account));
+        let mut pre_login_thread_wrapper = Some(command_async::pre_login(default_account,config.cookies.clone()));
         let mut new_session = None;
         Cli::command().print_help().unwrap();
         process!("交互模式 Ctrl+C 退出");
         let mut rl = completer::CommandEditor::build();
         loop {
-            match rl.readline(&format!("{} >",CMD_NAME.blue())){
+            match rl.readline(&format!("{} > ",CMD_NAME.blue())){
                 Ok(input)=>{
                     match input.as_str(){
                         "fetch" | "f" => {

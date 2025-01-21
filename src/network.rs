@@ -1,4 +1,7 @@
-use crate::{account, error, process, success, try_or_exit, utils, waiting, warning,begin,end};
+use crate::{
+    account, begin, end, error, process, success, try_or_exit, try_or_throw, utils, waiting,
+    warning,
+};
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -43,17 +46,53 @@ fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
 #[derive(Debug)]
 struct State {
     cookie_store: Arc<CookieStoreMutex>,
+    path_cookies: PathBuf,
 }
 
 impl State {
     /// 建立新的 cookie_store
-    pub fn try_new() -> anyhow::Result<State> {
-        let cookie_store = Arc::new(CookieStoreMutex::new(CookieStore::default()));
-        Ok(State { cookie_store })
+    pub fn try_new(path_cookies: PathBuf) -> anyhow::Result<State> {
+        #[allow(deprecated)]
+        let cookie_store = match File::open(&path_cookies) {
+            Ok(file) => match CookieStore::load_json(std::io::BufReader::new(file)) {
+                Ok(cookie_store) => cookie_store,
+                Err(_) => CookieStore::default(),
+            },
+            Err(_) => {
+                File::create(&path_cookies)?;
+                CookieStore::default()
+            }
+        };
+        let cookie_store = Arc::new(CookieStoreMutex::new(cookie_store));
+        Ok(State { cookie_store ,path_cookies})
     }
 }
 
+impl Drop for State {
+    fn drop(&mut self) {
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&self.path_cookies)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                error!("open {} for write failed. error: {}", self.path_cookies.display(), e);
+                return;
+            }
+        };
 
+        let store = self.cookie_store.lock().unwrap();
+        #[allow(deprecated)]
+        if let Err(e) = store.save_json(&mut file) {
+            error!(
+                "save cookies to path {} failed. error: {}",
+                &self.path_cookies.display(), e
+            );
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -64,8 +103,8 @@ pub struct Session {
 
 impl Session {
     /// 建立新的会话!
-    pub fn try_new() -> Result<Session> {
-        let state = State::try_new()?;
+    pub fn try_new(path_cookies: PathBuf) -> Result<Session> {
+        let state = State::try_new(path_cookies)?;
         let state = Arc::new(state);
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -90,38 +129,58 @@ impl Session {
     /// 登录!
     pub fn login(&self, account: &account::Account) -> Result<()> {
         const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
-        let res = self.client.get(LOGIN_URL).send()?;
-        let text = res.text()?;
-        let re =
-            regex::Regex::new(r#"<input type="hidden" name="execution" value="(.*?)" />"#).unwrap();
-        let execution = re
-            .captures(&text)
-            .and_then(|cap| cap.get(1).map(|m| m.as_str()))
-            .ok_or(anyhow!("Execution value not found"))?;
-        let res = self
-            .get("https://zjuam.zju.edu.cn/cas/v2/getPubKey")
-            .send()?;
+        const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
+        const HOME_URL: &str = "https://courses.zju.edu.cn";
+        let res = self.client.get(HOME_URL).send()?;
+        if res.url().query() == None {
+            return Ok(());
+        }
 
-        let json: Value = res.json()?;
-        let modulus = json["modulus"]
-            .as_str()
-            .ok_or(anyhow!("Modulus not found"))?;
-        let exponent = json["exponent"]
-            .as_str()
-            .ok_or(anyhow!("Exponent not found"))?;
+        let (execution, (modulus, exponent)) = rayon::join(
+            || {
+                let res = try_or_exit!(self.client.get(LOGIN_URL).send(), "连接登录页");
+                let text = res.text().unwrap();
+                let re =
+                    regex::Regex::new(r#"<input type="hidden" name="execution" value="(.*?)" />"#)
+                        .unwrap();
+                let execution = re
+                    .captures(&text)
+                    .and_then(|cap| cap.get(1).map(|m| m.as_str()))
+                    .ok_or(anyhow!("Execution value not found"))
+                    .unwrap()
+                    .to_string();
+                execution
+            },
+            || {
+                let res = try_or_exit!(self.client.get(PUBKEY_URL).send(), "获取公钥");
+                let json: Value = try_or_exit!(res.json(), "解析公钥");
+                let modulus = json["modulus"]
+                    .as_str()
+                    .ok_or(anyhow!("Modulus not found"))
+                    .unwrap()
+                    .to_string();
+                let exponent = json["exponent"]
+                    .as_str()
+                    .ok_or(anyhow!("Exponent not found"))
+                    .unwrap()
+                    .to_string();
+                (modulus, exponent)
+            },
+        );
 
-        let rsapwd = rsa_no_padding(&account.password, modulus, exponent);
+        let rsapwd = rsa_no_padding(&account.password, &modulus, &exponent);
 
         let params = [
             ("username", account.stuid.as_str()),
             ("password", &rsapwd),
-            ("execution", execution),
+            ("execution", &execution),
             ("_eventId", "submit"),
             ("authcode", ""),
+            ("rememberMe", "true"),
         ];
-        let res = self.client.post(LOGIN_URL).form(&params).send()?;
+        let res = try_or_throw!(self.client.post(LOGIN_URL).form(&params).send(), "提交登录");
         if res.status().is_success() {
-            self.get("https://courses.zju.edu.cn/user/courses").send()?;
+            try_or_throw!(self.get(HOME_URL).send(), "访问主页");
             Ok(())
         } else {
             let status = res.status();
@@ -156,7 +215,7 @@ impl Session {
 
     /// 获取课程列表!
     pub fn get_course_list(&self) -> Result<Vec<Course>> {
-        let res = self.client.get("https://courses.zju.edu.cn/api/my-courses?conditions=%7B%22status%22:%5B%22ongoing%22,%22notStarted%22%5D,%22keyword%22:%22%22,%22classify_type%22:%22recently_started%22,%22display_studio_list%22:false%7D&fields=id,name,semester_id&page=1&page_size=1000&showScorePassedStatus=false").send()?;
+        let res = self.client.get("https://courses.zju.edu.cn/api/my-courses?conditions=%7B%22status%22:%5B%22ongoing%22,%22notStarted%22%5D,%22keyword%22:%22%22,%22classify_type%22:%22recently_started%22,%22display_studio_list%22:false%7D&fields=id,name,semester_id&page=1&page_size=1000").send()?;
 
         let json: Value = res.json()?;
         let course_list: Vec<Course> = json["courses"]
@@ -318,7 +377,12 @@ impl Session {
     }
 
     /// 拉取下载任务！
-    fn fetch_download_tasks(&self, selected_courses: Vec<CourseFull>, activity_upload_record: &Vec<u64>, settings: &utils::Settings) -> Result<Vec<(String, String, u64, String)>> {
+    fn fetch_download_tasks(
+        &self,
+        selected_courses: Vec<CourseFull>,
+        activity_upload_record: &Vec<u64>,
+        settings: &utils::Settings,
+    ) -> Result<Vec<(String, String, u64, String)>> {
         #[cfg(debug_assertions)]
         let start = std::time::Instant::now();
 
@@ -413,7 +477,8 @@ impl Session {
         settings: &utils::Settings,
     ) -> Result<()> {
         begin!("更新课件信息");
-        let tasks = self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
+        let tasks =
+            self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
 
         if tasks.is_empty() {
             warning!("没有新课件");
@@ -566,11 +631,9 @@ impl Session {
         mut activity_upload_record: Vec<u64>,
         settings: &utils::Settings,
     ) -> Result<()> {
-
-
-
         begin!("更新课件信息");
-        let tasks = self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
+        let tasks =
+            self.fetch_download_tasks(selected_courses, &activity_upload_record, settings)?;
 
         if tasks.is_empty() {
             warning!("没有新课件");
@@ -580,6 +643,8 @@ impl Session {
 
         // 用自定义线程池将并发限制为 4
         waiting!("拉取新课件");
+        #[cfg(debug_assertions)]
+        let start = std::time::Instant::now();
         let pool = ThreadPoolBuilder::new().num_threads(4).build()?;
         pool.install(|| {
             let successful_uploads: Vec<u64> = tasks
@@ -614,6 +679,8 @@ impl Session {
                 }
             }
         });
+        #[cfg(debug_assertions)]
+        println!("下载课件: {:?}", start.elapsed());
 
         Ok(())
     }
@@ -786,9 +853,11 @@ impl Session {
 
         #[cfg(debug_assertions)]
         process!("Filtered Semester List: {:?}", filtered_semester_list);
-        let courses : Vec<CourseData> = filtered_semester_list.iter().map(|semester| {
-            semester_course_map.get(semester).unwrap().clone()
-        }).flatten().collect();
+        let courses: Vec<CourseData> = filtered_semester_list
+            .iter()
+            .map(|semester| semester_course_map.get(semester).unwrap().clone())
+            .flatten()
+            .collect();
         let num = courses.len();
         let pool = ThreadPoolBuilder::new().num_threads(num).build()?;
         let all_homeworks :Vec<Homework> = pool.install(||{

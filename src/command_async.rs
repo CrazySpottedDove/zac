@@ -4,16 +4,16 @@ use crate::{
 };
 
 use std::collections::HashMap;
-
+use std::path::PathBuf;
 use std::thread::{self, JoinHandle};
 
 // 交互模式专用的预登录操作，希望减少用户等待登录时间
-pub fn pre_login(default_account: account::Account) -> JoinHandle<network::Session> {
+pub fn pre_login(default_account: account::Account, path_cookies: PathBuf) -> JoinHandle<network::Session> {
     thread::spawn(move || {
         #[cfg(debug_assertions)]
         process!("PRE_LOGIN");
 
-        let session = try_or_exit!(network::Session::try_new(), "创建会话");
+        let session = try_or_exit!(network::Session::try_new(path_cookies), "创建会话");
 
         try_or_exit!(session.login(&default_account), "登录");
 

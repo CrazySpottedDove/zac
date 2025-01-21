@@ -13,7 +13,7 @@ pub fn fetch(
     process!("FETCH");
 
     begin!("登录");
-    let session = try_or_log!(network::Session::try_new(), "创建会话");
+    let session = try_or_log!(network::Session::try_new(config.cookies.clone()), "创建会话");
 
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
@@ -45,7 +45,7 @@ pub fn submit(config: &utils::Config, default_account: &account::Account) {
     process!("SUBMIT");
 
     begin!("登录");
-    let session = try_or_log!(network::Session::try_new(), "创建会话");
+    let session = try_or_log!(network::Session::try_new(config.cookies.clone()), "创建会话");
 
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
@@ -59,7 +59,7 @@ pub fn upgrade(config: &utils::Config, default_account: &account::Account) {
     process!("UPGRADE");
 
     begin!("登录");
-    let session = try_or_log!(network::Session::try_new(), "创建会话");
+    let session = try_or_log!(network::Session::try_new(config.cookies.clone()), "创建会话");
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
@@ -97,7 +97,7 @@ pub fn task(config: &utils::Config, default_account: &account::Account) {
     process!("TASK");
 
     begin!("登录");
-    let session = try_or_log!(network::Session::try_new(), "创建会话");
+    let session = try_or_log!(network::Session::try_new(config.cookies.clone()), "创建会话");
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
