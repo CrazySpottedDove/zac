@@ -1,0 +1,77 @@
+name: Rust Multi-Platform Build
+
+on:
+  push:
+    branches: [ "dev","master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Add macOS targets
+      run: |
+        rustup target add aarch64-apple-darwin
+        rustup target add x86_64-apple-darwin
+    - name: Build macOS binaries
+      run: |
+        cargo build --release --features pb --target aarch64-apple-darwin --bin zacpb
+        cargo build --release --target aarch64-apple-darwin --bin zac
+        cargo build --release --features pb --target x86_64-apple-darwin --bin zacpb
+        cargo build --release --target x86_64-apple-darwin --bin zac
+    - name: Upload macOS binaries
+      uses: actions/upload-artifact@v3
+      with:
+        name: macos-binaries
+        path: |
+          target/aarch64-apple-darwin/release/zacpb
+          target/aarch64-apple-darwin/release/zac
+          target/x86_64-apple-darwin/release/zacpb
+          target/x86_64-apple-darwin/release/zac
+
+  build-windows:
+    name: Build for Windows
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Add Windows target
+      run: rustup target add x86_64-pc-windows-msvc
+    - name: Build Windows binaries
+      run: |
+        cargo build --release --features pb --target x86_64-pc-windows-msvc --bin zacpb
+        cargo build --release --target x86_64-pc-windows-msvc --bin zac
+    - name: Upload Windows binaries
+      uses: actions/upload-artifact@v3
+      with:
+        name: windows-binaries
+        path: |
+          target/x86_64-pc-windows-msvc/release/zacpb.exe
+          target/x86_64-pc-windows-msvc/release/zac.exe
+
+  build-linux:
+    name: Build for Linux
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Add Linux target
+      run: rustup target add x86_64-unknown-linux-gnu
+    - name: Build Linux binaries
+      run: |
+        cargo build --release --features pb --target x86_64-unknown-linux-gnu --bin zacpb
+        cargo build --release --target x86_64-unknown-linux-gnu --bin zac
+    - name: Upload Linux binaries
+      uses: actions/upload-artifact@v3
+      with:
+        name: linux-binaries
+        path: |
+          target/x86_64-unknown-linux-gnu/release/zacpb
+          target/x86_64-unknown-linux-gnu/release/zac
