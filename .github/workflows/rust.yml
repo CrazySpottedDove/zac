@@ -46,8 +46,8 @@ jobs:
       run: rustup target add x86_64-pc-windows-msvc
     - name: Build Windows binaries
       run: |
-        cargo build --release --features pb --target x86_64-pc-windows-msvc --bin zacpb
-        cargo build --release --target x86_64-pc-windows-msvc --bin zac
+        cargo build --features pb --target x86_64-pc-windows-msvc --bin zacpb
+        cargo build --target x86_64-pc-windows-msvc --bin zac
     - name: Upload Windows binaries
       uses: actions/upload-artifact@v3
       with:
@@ -66,8 +66,8 @@ jobs:
       run: rustup target add x86_64-unknown-linux-gnu
     - name: Build Linux binaries
       run: |
-        cargo build --release --features pb --target x86_64-unknown-linux-gnu --bin zacpb
-        cargo build --release --target x86_64-unknown-linux-gnu --bin zac
+        cargo build --features pb --target x86_64-unknown-linux-gnu --bin zacpb
+        cargo build --target x86_64-unknown-linux-gnu --bin zac
     - name: Upload Linux binaries
       uses: actions/upload-artifact@v3
       with:
