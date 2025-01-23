@@ -108,7 +108,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: ${{ github.ref_name }}
-          body: "请根据自己的平台下载对应的二进制文件，其中带 pb 的为进度条特性构建版本。"
+          body: "请根据自己的平台下载对应的二进制文件，其中带 pb 的为进度条特性构建版本。下载后，可自行修改文件名称为 zac 或 zacpb。"
           draft: false
           prerelease: false
         env:
@@ -130,6 +130,26 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: macos/aarch64-apple-darwin/release/zacpb
           asset_name: zacpb_macos_arm64
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS (x86_64) zac
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: macos/x86_64-apple-darwin/release/zac
+          asset_name: zac_macos_x86_64
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS (x86_64) zacpb
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: macos/x86_64-apple-darwin/release/zacpb
+          asset_name: zacpb_macos_x86_64
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
