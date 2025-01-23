@@ -1,0 +1,145 @@
+name: Rust Multi-Platform Build/master
+
+on:
+  push:
+    branches: [ "master" ]
+    # 新增：当推送 tag（如 v1.0.0）时触发
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add macOS targets
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+      - name: Build macOS binaries
+        run: |
+          cargo build --release --features pb --target aarch64-apple-darwin --bin zacpb
+          cargo build --release --target aarch64-apple-darwin --bin zac
+          cargo build --release --features pb --target x86_64-apple-darwin --bin zacpb
+          cargo build --release --target x86_64-apple-darwin --bin zac
+      - name: Upload macOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: |
+            target/aarch64-apple-darwin/release/zacpb
+            target/aarch64-apple-darwin/release/zac
+            target/x86_64-apple-darwin/release/zacpb
+            target/x86_64-apple-darwin/release/zac
+
+  build-windows:
+    name: Build for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add Windows target
+        run: rustup target add x86_64-pc-windows-msvc
+      - name: Build Windows binaries
+        run: |
+          cargo build --release --features pb --target x86_64-pc-windows-msvc --bin zacpb
+          cargo build --release --target x86_64-pc-windows-msvc --bin zac
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            target/x86_64-pc-windows-msvc/release/zacpb.exe
+            target/x86_64-pc-windows-msvc/release/zac.exe
+
+  build-linux:
+    name: Build for Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add Linux target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Build Linux binaries
+        run: |
+          cargo build --release --features pb --target x86_64-unknown-linux-gnu --bin zacpb
+          cargo build --release --target x86_64-unknown-linux-gnu --bin zac
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: |
+            target/x86_64-unknown-linux-gnu/release/zacpb
+            target/x86_64-unknown-linux-gnu/release/zac
+
+  release:
+    name: Create & Upload Release
+    runs-on: ubuntu-latest
+    # 等 macOS、Windows、Linux 三平台构建完成后再执行
+    needs: [build-macos, build-windows, build-linux]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-binaries
+          path: macos
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binaries
+          path: windows
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: linux
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          body: "请根据自己的平台下载对应的二进制文件，其中带 pb 的为进度条特性构建版本。"
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS (arm64) Binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: macos/zacpb
+          asset_name: zacpb_macos_arm64
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows Binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: windows/zac.exe
+          asset_name: zac_windows_x86_64.exe
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux Binary
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: linux/zac
+          asset_name: zac_linux_x86_64
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -16,14 +16,15 @@
 一次性模式用法如下：
 
 ```help
-Usage: zacpb [OPTIONS]
+Usage: zac [OPTIONS]
 
 Options:
-  -f, --fetch    拉取课件。如果不知道该做什么，它会带着你做一遍
-  -s, --submit   提交作业，尚未完成
-  -u, --upgrade  一般在升学期时用，更新课程列表
+  -f, --fetch    拉取课件
+  -s, --submit   提交作业
+  -u, --upgrade  更新课程列表，有新课时用
   -w, --which    选择需要拉取的课程
   -t, --task     查看作业
+  -g, --grade    查看成绩
   -c, --config   配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
   -h, --help     Print help
   -V, --version  Print version
@@ -92,9 +93,11 @@ cargo build --release --features pb --target-dir target_windows_pb --target x86_
 cargo build --release --target-dir target_windows_no_pb
 ```
 
+如果直接在 Github 克隆本项目，则可以直接使用本项目的 workflows 文件获取不同平台构建结果。
+
 ## Known Issues
 
-* 当打开了 zac 并调整终端大小时，可能导致程序崩溃。该问题由 rustyline 引起，暂未找到解决方案。
+* 当打开了 zac 并调整终端大小时，可能导致程序崩溃。该问题可能由 rustyline 引起，暂未找到解决方案。
 
 ```rust
 assertion failed: fd != u32::MAX as RawFd

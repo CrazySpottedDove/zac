@@ -1,10 +1,10 @@
-name: Rust Multi-Platform Build
+name: Rust Multi-Platform Build/dev
 
 on:
   push:
-    branches: [ "dev","master" ]
+    branches: [ "dev" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "dev" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,10 +22,10 @@ jobs:
         rustup target add x86_64-apple-darwin
     - name: Build macOS binaries
       run: |
-        cargo build --release --features pb --target aarch64-apple-darwin --bin zacpb
-        cargo build --release --target aarch64-apple-darwin --bin zac
-        cargo build --release --features pb --target x86_64-apple-darwin --bin zacpb
-        cargo build --release --target x86_64-apple-darwin --bin zac
+        cargo build --features pb --target aarch64-apple-darwin --bin zacpb
+        cargo build --target aarch64-apple-darwin --bin zac
+        cargo build --features pb --target x86_64-apple-darwin --bin zacpb
+        cargo build --target x86_64-apple-darwin --bin zac
     - name: Upload macOS binaries
       uses: actions/upload-artifact@v4
       with:
