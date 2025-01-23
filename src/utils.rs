@@ -1,4 +1,3 @@
-use crate::{account, network};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
@@ -281,6 +280,7 @@ pub struct Config {
     pub selected_courses: PathBuf,
     pub activity_upload_record: PathBuf,
     pub cookies: PathBuf,
+    pub active_courses: PathBuf,
 }
 
 impl Config {
@@ -317,13 +317,19 @@ impl Config {
             Config::cookies_init(&cookies)?;
         }
 
+        let active_courses = config_path.join("active_courses.json");
+        if !active_courses.exists() {
+            Config::active_courses_init(&active_courses)?;
+        }
+
         Ok(Config {
             accounts,
             settings,
             courses,
             selected_courses,
             activity_upload_record,
-            cookies
+            cookies,
+            active_courses,
         })
     }
 
@@ -374,9 +380,16 @@ impl Config {
     }
 
     /// 初始化 cookies 文件！
-    pub fn cookies_init(cookies: &PathBuf) -> Result<()> {
+    fn cookies_init(cookies: &PathBuf) -> Result<()> {
         fs::write(cookies, "{}")?;
         success!("初始化 cookies 文件 -> {}", cookies.display());
+        Ok(())
+    }
+
+    /// 初始化 active_courses 文件！
+    fn active_courses_init(active_courses: &PathBuf) -> Result<()> {
+        fs::write(active_courses, "[]")?;
+        success!("初始化 active_courses 文件 -> {}", active_courses.display());
         Ok(())
     }
 }

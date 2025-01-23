@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use std::thread::{self, JoinHandle};
 
 // 交互模式专用的预登录操作，希望减少用户等待登录时间
-pub fn pre_login(default_account: account::Account, path_cookies: PathBuf) -> JoinHandle<network::Session> {
+pub fn pre_login(
+    default_account: account::Account,
+    path_cookies: PathBuf,
+) -> JoinHandle<network::Session> {
     thread::spawn(move || {
         #[cfg(debug_assertions)]
         process!("PRE_LOGIN");
@@ -94,4 +97,12 @@ pub fn task(config: &utils::Config, session: &network::Session) {
     try_or_log!(command_share::task_core(config, session), "TASK");
 
     success!("TASK");
+}
+
+pub fn grade(config: &utils::Config,account: &account::Account, session: &network::Session) {
+    process!("GRADE");
+
+    try_or_log!(command_share::grade_core(config,account, session), "GRADE");
+
+    success!("GRADE");
 }

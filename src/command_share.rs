@@ -127,9 +127,17 @@ pub fn upgrade_core(config: &utils::Config, session: &network::Session) -> Resul
 
     let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
 
+    let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
     try_or_throw!(
-        network::Session::store_semester_course_map(&config.courses, course_list, semester_map),
+        network::Session::store_semester_course_map(&config.courses, &semester_course_map),
         "存储 学期->课程 映射表"
+    );
+
+    let active_courses = network::Session::filter_active_courses(&semester_course_map);
+
+    try_or_throw!(
+        network::Session::store_active_courses(&config.active_courses, &active_courses),
+        "存储活跃课程列表"
     );
 
     Ok(())
@@ -414,5 +422,10 @@ pub fn task_core(config: &utils::Config,session: &network::Session)->Result<()>{
     for homework in homework_list{
         println!("  {}",homework.name);
     }
+    Ok(())
+}
+
+pub fn grade_core(config: &utils::Config, account: &account::Account, session: &network::Session) -> Result<()> {
+    try_or_throw!(session.get_grade(&config.courses,&account), "获取成绩列表");
     Ok(())
 }

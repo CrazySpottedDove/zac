@@ -5,7 +5,9 @@ use crate::{
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
+use colored::Colorize;
 use cookie_store::CookieStore;
+use num::ToPrimitive;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use reqwest::blocking::multipart;
@@ -21,6 +23,11 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
+const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
+const HOME_URL: &str = "https://courses.zju.edu.cn";
+const GRADE_SERVICE_URL: &str = "http://appservice.zju.edu.cn/zdjw/cjcx/cjcxjg";
+const GRADE_URL: &str = "http://appservice.zju.edu.cn/zju-smartcampus/zdydjw/api/kkqk_cxXscjxx";
 #[cfg(feature = "pb")]
 use {
     colored::*,
@@ -64,7 +71,10 @@ impl State {
             }
         };
         let cookie_store = Arc::new(CookieStoreMutex::new(cookie_store));
-        Ok(State { cookie_store ,path_cookies})
+        Ok(State {
+            cookie_store,
+            path_cookies,
+        })
     }
 }
 
@@ -78,7 +88,11 @@ impl Drop for State {
         {
             Ok(f) => f,
             Err(e) => {
-                error!("open {} for write failed. error: {}", self.path_cookies.display(), e);
+                error!(
+                    "open {} for write failed. error: {}",
+                    self.path_cookies.display(),
+                    e
+                );
                 return;
             }
         };
@@ -88,7 +102,8 @@ impl Drop for State {
         if let Err(e) = store.save_json(&mut file) {
             error!(
                 "save cookies to path {} failed. error: {}",
-                &self.path_cookies.display(), e
+                &self.path_cookies.display(),
+                e
             );
         }
     }
@@ -125,17 +140,7 @@ impl Session {
 
         Ok(Session { state, client })
     }
-
-    /// 登录!
-    pub fn login(&self, account: &account::Account) -> Result<()> {
-        const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
-        const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
-        const HOME_URL: &str = "https://courses.zju.edu.cn";
-        let res = self.client.get(HOME_URL).send()?;
-        if res.url().query() == None {
-            return Ok(());
-        }
-
+    fn login_core(&self, account: &account::Account) -> Result<()> {
         let (execution, (modulus, exponent)) = rayon::join(
             || {
                 let res = try_or_exit!(self.client.get(LOGIN_URL).send(), "连接登录页");
@@ -180,7 +185,17 @@ impl Session {
         ];
         let res = try_or_throw!(self.client.post(LOGIN_URL).form(&params).send(), "提交登录");
         if res.status().is_success() {
-            try_or_throw!(self.get(HOME_URL).send(), "访问主页");
+            rayon::join(
+                || {
+                    try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
+                },
+                || {
+                    try_or_exit!(
+                        self.client.get(GRADE_SERVICE_URL).send(),
+                        "连接成绩查询主页"
+                    );
+                },
+            );
             Ok(())
         } else {
             let status = res.status();
@@ -188,6 +203,33 @@ impl Session {
             error!("登录状态码：{}，响应内容：{}", status, text);
             Err(anyhow!("登录失败"))
         }
+    }
+
+    /// 登录!
+    pub fn login(&self, account: &account::Account) -> Result<()> {
+        let (zcourse_query_wrapper, zgrade_query_wrapper) = rayon::join(
+            || {
+                let res = try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
+                res.url().query().map(|q| q.to_owned())
+            },
+            || {
+                let res = try_or_exit!(
+                    self.client.get(GRADE_SERVICE_URL).send(),
+                    "连接成绩查询主页"
+                );
+                res.url().query().map(|q| q.to_owned())
+            },
+        );
+        if zcourse_query_wrapper.is_none() && zgrade_query_wrapper.is_none() {
+            return Ok(());
+        }
+        self.login_core(account)
+    }
+
+    /// 重新登录!
+    pub fn relogin(&self, account: &account::Account) -> Result<()> {
+        self.state.cookie_store.lock().unwrap().clear();
+        self.login_core(account)
     }
 
     /// 获取学期映射表!
@@ -233,12 +275,10 @@ impl Session {
         Ok(course_list)
     }
 
-    /// 存储学期-课程映射表!
-    pub fn store_semester_course_map(
-        path_courses: &PathBuf,
+    pub fn to_semester_course_map(
         course_list: Vec<Course>,
         semester_map: HashMap<u64, String>,
-    ) -> Result<()> {
+    ) -> HashMap<String, Vec<CourseData>> {
         let mut semester_course_map: HashMap<String, Vec<CourseData>> = HashMap::new();
         for course in course_list {
             if let Some(semester_name) = semester_map.get(&course.sid) {
@@ -252,6 +292,13 @@ impl Session {
                     .push(course_data);
             }
         }
+        semester_course_map
+    }
+    /// 存储学期-课程映射表!
+    pub fn store_semester_course_map(
+        path_courses: &PathBuf,
+        semester_course_map: &HashMap<String, Vec<CourseData>>,
+    ) -> Result<()> {
         std::fs::write(
             path_courses,
             serde_json::to_string(&semester_course_map).unwrap(),
@@ -840,24 +887,54 @@ impl Session {
         Ok(id)
     }
 
-    /// 获取作业列表
-    ///
-    /// homework: id, name, ddl, description
-    pub fn get_homework_list(&self, path_courses: &PathBuf) -> Result<Vec<Homework>> {
-        let semester_course_map = try_or_exit!(
-            Session::load_semester_course_map(path_courses),
-            "加载 学期->课程 映射表"
-        );
+    /// 将 学期 -> 课程 映射表转换为活跃课程列表
+    pub fn filter_active_courses(
+        semester_course_map: &HashMap<String, Vec<CourseData>>,
+    ) -> Vec<CourseData> {
         let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
         let filtered_semester_list = filter_latest_group(&semester_list);
 
-        #[cfg(debug_assertions)]
-        process!("Filtered Semester List: {:?}", filtered_semester_list);
         let courses: Vec<CourseData> = filtered_semester_list
             .iter()
             .map(|semester| semester_course_map.get(semester).unwrap().clone())
             .flatten()
             .collect();
+
+        courses
+    }
+
+    /// 加载活跃课程
+    pub fn load_active_courses(path_active_courses: &PathBuf) -> Result<Vec<CourseData>> {
+        let data = fs::read_to_string(path_active_courses)?;
+        let active_courses: Vec<CourseData> = serde_json::from_str(&data)?;
+
+        #[cfg(debug_assertions)]
+        success!("加载活跃课程");
+
+        Ok(active_courses)
+    }
+
+    /// 存储活跃课程
+    pub fn store_active_courses(
+        path_active_courses: &PathBuf,
+        active_courses: &Vec<CourseData>,
+    ) -> Result<()> {
+        fs::write(path_active_courses, serde_json::to_string(active_courses)?)?;
+
+        #[cfg(debug_assertions)]
+        success!("存储活跃课程");
+
+        Ok(())
+    }
+
+    /// 获取作业列表
+    ///
+    /// homework: id, name, ddl, description
+    pub fn get_homework_list(&self, path_active_courses: &PathBuf) -> Result<Vec<Homework>> {
+        let courses = try_or_throw!(
+            Session::load_active_courses(path_active_courses),
+            "加载活跃课程"
+        );
         let num = courses.len();
         let pool = ThreadPoolBuilder::new().num_threads(num).build()?;
         let all_homeworks :Vec<Homework> = pool.install(||{
@@ -1003,6 +1080,81 @@ impl Session {
 
         Ok(())
     }
+
+    /// 获取成绩
+    pub fn get_grade(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
+        let form = json!({
+            "xh":account.stuid
+        });
+        begin!("查询成绩");
+        let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(),"查询成绩");
+        end!("查询成绩");
+
+        let json: Value = res.json()?;
+        let semester_course_map = Session::load_semester_course_map(path_courses)?;
+        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+        let filtered_semester_list = filter_latest_group(&semester_list);
+        let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
+            .iter()
+            .map(|semester| split_semester(semester).unwrap())
+            .collect();
+        let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
+            .iter()
+            .map(|(xn, _)| *xn)
+            .collect();
+        let xq_set: std::collections::HashSet<&str> = filtered_semester_group_list
+            .iter()
+            .map(|(_, xq)| *xq)
+            .collect();
+        let grade_list: Vec<Grade> = json["data"]["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|grade_json| {
+                let obj = grade_json.as_object()?;
+
+                let xq = obj["xq"].as_str()?;
+                let xn = obj["xn"].as_str()?;
+                if xn_set.contains(xn) && xq_set.contains(xq) {
+                    let name = obj["kcmc"].as_str()?;
+                    let credit = obj["xf"].as_str()?;
+                    let gpa = obj["jd"].as_f64()?;
+                    let grade = obj["cj"].as_str()?;
+                    let gpa_str;
+                    if gpa <= 5.0 && gpa >= 4.5 {
+                        gpa_str = format!("{:.1}", gpa).green();
+                    } else if gpa < 4.5 && gpa >= 3.5 {
+                        gpa_str = format!("{:.1}", gpa).cyan();
+                    } else if gpa < 3.5 && gpa >= 2.4 {
+                        gpa_str = format!("{:.1}", gpa).yellow();
+                    } else if gpa < 2.4 && gpa > 0.0 {
+                        gpa_str = format!("{:.1}", gpa).red();
+                    } else {
+                        gpa_str = format!("{:.1}", gpa).white();
+                    }
+                    let credit_num: f64 = credit.parse().unwrap();
+                    let name_str = if credit_num >= 4.0 {
+                        name.purple()
+                    } else if credit_num >= 2.0 {
+                        name.blue()
+                    } else {
+                        name.white()
+                    };
+                    return Some(Grade {
+                        name: name_str.to_string(),
+                        grade: grade.to_string(),
+                        credit: credit.to_string(),
+                        gpa: gpa_str.to_string(),
+                    });
+                }
+                None
+            })
+            .collect();
+
+        let table = create_table(&grade_list);
+        println!("{}", table);
+        Ok(())
+    }
 }
 
 impl Deref for Session {
@@ -1034,6 +1186,13 @@ pub struct CourseFull {
 pub struct Homework {
     pub id: u64,
     pub name: String,
+}
+
+pub struct Grade {
+    pub name: String,
+    pub grade: String,
+    pub credit: String,
+    pub gpa: String,
 }
 
 /// 拆分 "2024-2025春夏" => ("2024-2025", "春夏") 的辅助函数
@@ -1124,4 +1283,121 @@ fn format_ddl(original_ddl: &str) -> String {
     let formatted_ddl = time_utc.format("ddl: %m-%d %H:%M %Y").to_string();
 
     formatted_ddl
+}
+
+fn strip_ansi_codes(s: &str) -> String {
+    let mut stripped = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // 开始转义序列，跳过直到 'm'
+            while let Some(c_inner) = chars.next() {
+                if c_inner == 'm' {
+                    break;
+                }
+            }
+        } else {
+            stripped.push(c);
+        }
+    }
+    stripped
+}
+
+fn is_wide_char(c: char) -> bool {
+    match c {
+        // CJK Unified Ideographs
+        '\u{4E00}'..='\u{9FFF}' | '（' | '）' => true,
+        _ => false,
+    }
+}
+
+fn wide_char_num(c: &str) -> usize {
+    c.chars().map(|c| if is_wide_char(c) { 1 } else { 0 }).sum()
+}
+
+fn width_shift(c: &str) -> isize {
+    let cjk_shift: isize = c
+        .chars()
+        .map(|c| if is_wide_char(c) { -1 } else { 0 })
+        .sum();
+    let color_shift: isize = if c.contains('\x1b') { 9 } else { 0 };
+    cjk_shift + color_shift
+}
+fn display_width(s: &str) -> usize {
+    strip_ansi_codes(s)
+        .chars()
+        .map(|c| if is_wide_char(c) { 2 } else { 1 })
+        .sum()
+}
+
+fn calculate_column_widths(data: &[Grade], headers: &[&str]) -> Vec<usize> {
+    let mut widths = vec![0; headers.len()];
+
+    // 初始化列宽为标题的宽度
+    for (i, header) in headers.iter().enumerate() {
+        widths[i] = display_width(header);
+    }
+
+    // 更新列宽为内容的最大宽度
+    for grade in data {
+        let columns = vec![&grade.name, &grade.grade, &grade.credit, &grade.gpa];
+
+        for (i, col) in columns.iter().enumerate() {
+            let len = display_width(col);
+            if len > widths[i] {
+                widths[i] = len;
+            }
+        }
+    }
+    widths
+}
+
+fn create_table(data: &[Grade]) -> String {
+    let headers = ["课程", "成绩", "绩点", "学分"];
+    let column_widths = calculate_column_widths(data, &headers);
+
+    let mut table = String::new();
+
+    // 构建分隔线
+    let separator = column_widths
+        .iter()
+        .map(|w| format!("+{}", "-".repeat(*w + 2)))
+        .collect::<String>()
+        + "+\n";
+
+    // 添加表头
+    table.push_str(&separator);
+    table.push_str("|");
+    for (i, header) in headers.iter().enumerate() {
+        let padded = format!(
+            " {:width$} ",
+            header,
+            width = column_widths[i] - wide_char_num(header)
+        );
+        table.push_str(&padded);
+        table.push('|');
+    }
+    table.push('\n');
+    table.push_str(&separator);
+
+    // 添加数据行
+    for grade in data {
+        table.push('|');
+        let columns = vec![&grade.name, &grade.grade, &grade.gpa, &grade.credit];
+
+        for (i, col) in columns.iter().enumerate() {
+            let padded = format!(
+                " {:width$} ",
+                col,
+                width = (column_widths[i].to_isize().unwrap() + width_shift(col))
+                    .to_usize()
+                    .unwrap()
+            );
+            table.push_str(&padded);
+            table.push('|');
+        }
+        table.push('\n');
+        table.push_str(&separator);
+    }
+    table
 }

@@ -9,10 +9,32 @@ use rustyline::validate::Validator;
 use rustyline::Result as RResult;
 use rustyline::{Context, Editor, Helper};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::error::Error;
 use std::path::PathBuf;
-use std::cell::RefCell;
 
+const COMMANDS: &[&str] = &[
+    "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "h", "f", "s", "u",
+    "c", "w", "g", "t",
+];
+const CONFIG_COMMANDS: &[&str] = &[
+    "help",
+    "add-account",
+    "remove-account",
+    "user-default",
+    "storage-dir",
+    "mp4-trashed",
+    "pdf-or-ppt",
+    "list-config",
+    "a",
+    "r",
+    "u",
+    "s",
+    "m",
+    "p",
+    "l",
+    "h",
+];
 /// 用于文件名（路径）补全的 Helper 结构
 struct FilePathHelper {
     completer: FilenameCompleter,
@@ -29,7 +51,7 @@ impl Completer for FilePathHelper {
         ctx: &Context<'_>,
     ) -> Result<(usize, Vec<Pair>), ReadlineError> {
         // 直接使用 FilenameCompleter 的补全结果
-        let (start, candidates) = self.completer.complete(line, pos,ctx)?;
+        let (start, candidates) = self.completer.complete(line, pos, ctx)?;
 
         // 更新 last_completions，用于高亮逻辑
         let mut last = self.last_completions.borrow_mut();
@@ -122,8 +144,8 @@ pub fn readin_storage_dir() -> String {
         .completion_type(CompletionType::List)
         .build();
     // 创建 Editor，使用自定义的 FilePathHelper
-    let mut rl =
-        Editor::<FilePathHelper, DefaultHistory>::with_config(config).expect("Fail to create editor");
+    let mut rl = Editor::<FilePathHelper, DefaultHistory>::with_config(config)
+        .expect("Fail to create editor");
     rl.set_helper(Some(FilePathHelper {
         completer: FilenameCompleter::new(),
         last_completions: RefCell::new(Vec::new()),
@@ -166,8 +188,8 @@ pub fn readin_path() -> PathBuf {
         "rtf", "zip", "rar", "tar", "mat", "dwg", "m", "mlapp", "slx", "mlx",
     ];
     // 创建 Editor，使用自定义的 FilePathHelper
-    let mut rl =
-        Editor::<FilePathHelper, DefaultHistory>::with_config(config).expect("Fail to create editor");
+    let mut rl = Editor::<FilePathHelper, DefaultHistory>::with_config(config)
+        .expect("Fail to create editor");
     rl.set_helper(Some(FilePathHelper {
         completer: FilenameCompleter::new(),
         last_completions: RefCell::new(Vec::new()),
@@ -206,9 +228,6 @@ pub fn readin_path() -> PathBuf {
         }
     }
 }
-
-const COMMANDS: &[&str] = &["help","fetch", "submit", "upgrade", "config" ,"which","task","h","f","s","u","c","w","t"];
-const CONFIG_COMMANDS: &[&str]=&["help","add-account","remove-account","user-default","storage-dir","mp4-trashed","pdf-or-ppt","list-config","a","r","u","s","m","p","l","h"];
 
 #[derive(Default)]
 struct CmdCompleter;
@@ -249,7 +268,7 @@ impl Highlighter for CommandHelper {
 
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         // 检查输入是否完全匹配任何命令
-        if COMMANDS.contains(&line){
+        if COMMANDS.contains(&line) {
             // 使用绿色高亮完全匹配的输入
             Cow::Owned(format!("\x1b[1;32m{}\x1b[0m", line)) // 加粗并设置为绿色
         } else {
@@ -382,5 +401,3 @@ impl ConfigEditor {
         rl
     }
 }
-
-
