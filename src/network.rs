@@ -5,6 +5,7 @@ use crate::{
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
+use colored::ColoredString;
 use colored::Colorize;
 use cookie_store::CookieStore;
 use num::ToPrimitive;
@@ -1081,13 +1082,13 @@ impl Session {
         Ok(())
     }
 
-    /// 获取成绩
+    /// 获取成绩 并打印全部
     pub fn get_grade(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
         let form = json!({
             "xh":account.stuid
         });
         begin!("查询成绩");
-        let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(),"查询成绩");
+        let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
         end!("查询成绩");
 
         let json: Value = res.json()?;
@@ -1106,53 +1107,139 @@ impl Session {
             .iter()
             .map(|(_, xq)| *xq)
             .collect();
+        let mut weight_sum = 0.0;
+        let mut credit_sum = 0.0;
+        let mut weight_sum_semester = 0.0;
+        let mut credit_sum_semester = 0.0;
+        let mut weight_sum_year = 0.0;
+        let mut credit_sum_year = 0.0;
+
+        let all_grade_list: Vec<Grade> = json["data"]["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|grade_json| {
+                let obj = grade_json.as_object()?;
+                let name = obj["kcmc"].as_str()?;
+                let xq = obj["xq"].as_str()?;
+                let xn = obj["xn"].as_str()?;
+                let credit = obj["xf"].as_str()?;
+                let gpa = obj["jd"].as_f64()?;
+                let grade = obj["cj"].as_str()?;
+                let gpa_str = format_gpa_str(gpa);
+                let credit_num: f64 = credit.parse().unwrap();
+                let name_str = format_class_name(name, credit_num);
+                weight_sum += gpa * credit_num;
+                credit_sum += credit_num;
+                if xn_set.contains(xn) {
+                    weight_sum_year += gpa * credit_num;
+                    credit_sum_year += credit_num;
+                    if xq_set.contains(xq) {
+                        weight_sum_semester += gpa * credit_num;
+                        credit_sum_semester += credit_num;
+                    }
+                }
+                return Some(Grade {
+                    name: name_str.to_string(),
+                    grade: grade.to_string(),
+                    credit: credit.to_string(),
+                    gpa: gpa_str.to_string(),
+                });
+            })
+            .collect();
+
+        let avg_gpa = weight_sum / credit_sum;
+        let avg_gpa_semester = weight_sum_semester / credit_sum_semester;
+        let avg_gpa_year = weight_sum_year / credit_sum_year;
+        println!("{}", create_table(&all_grade_list));
+        println!(
+            "学期均绩：{:.2}/{:.1}",
+            avg_gpa_semester, credit_sum_semester
+        );
+        println!("学年均绩：{:.2}/{:.1}", avg_gpa_year, credit_sum_year);
+        println!(" 总均绩 ：{:.2}/{:.1}", avg_gpa, credit_sum);
+        Ok(())
+    }
+
+    /// 获取成绩 并打印本学期
+    pub fn get_g(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
+        let form = json!({
+            "xh":account.stuid
+        });
+        begin!("查询成绩");
+        let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+        end!("查询成绩");
+
+        let json: Value = res.json()?;
+        let semester_course_map = Session::load_semester_course_map(path_courses)?;
+        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+        let filtered_semester_list = filter_latest_group(&semester_list);
+        let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
+            .iter()
+            .map(|semester| split_semester(semester).unwrap())
+            .collect();
+        let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
+            .iter()
+            .map(|(xn, _)| *xn)
+            .collect();
+        let xq_set: std::collections::HashSet<&str> = filtered_semester_group_list
+            .iter()
+            .map(|(_, xq)| *xq)
+            .collect();
+        let mut weight_sum = 0.0;
+        let mut credit_sum = 0.0;
+        let mut weight_sum_semester = 0.0;
+        let mut credit_sum_semester = 0.0;
+        let mut weight_sum_year = 0.0;
+        let mut credit_sum_year = 0.0;
+
         let grade_list: Vec<Grade> = json["data"]["list"]
             .as_array()
             .unwrap()
             .iter()
             .filter_map(|grade_json| {
                 let obj = grade_json.as_object()?;
-
                 let xq = obj["xq"].as_str()?;
                 let xn = obj["xn"].as_str()?;
-                if xn_set.contains(xn) && xq_set.contains(xq) {
-                    let name = obj["kcmc"].as_str()?;
-                    let credit = obj["xf"].as_str()?;
-                    let gpa = obj["jd"].as_f64()?;
-                    let grade = obj["cj"].as_str()?;
-                    let gpa_str;
-                    if gpa <= 5.0 && gpa >= 4.5 {
-                        gpa_str = format!("{:.1}", gpa).green();
-                    } else if gpa < 4.5 && gpa >= 3.5 {
-                        gpa_str = format!("{:.1}", gpa).cyan();
-                    } else if gpa < 3.5 && gpa >= 2.4 {
-                        gpa_str = format!("{:.1}", gpa).yellow();
-                    } else if gpa < 2.4 && gpa > 0.0 {
-                        gpa_str = format!("{:.1}", gpa).red();
-                    } else {
-                        gpa_str = format!("{:.1}", gpa).white();
+                let gpa = obj["jd"].as_f64()?;
+                let credit = obj["xf"].as_str()?;
+                let credit_num: f64 = credit.parse().unwrap();
+                weight_sum += gpa * credit_num;
+                credit_sum += credit_num;
+                if xn_set.contains(xn) {
+                    weight_sum_year += gpa * credit_num;
+                    credit_sum_year += credit_num;
+                    if xq_set.contains(xq) {
+                        let name = obj["kcmc"].as_str()?;
+                        let grade = obj["cj"].as_str()?;
+                        let gpa_str = format_gpa_str(gpa);
+                        let name_str = format_class_name(name, credit_num);
+                        weight_sum_semester += gpa * credit_num;
+                        credit_sum_semester += credit_num;
+                        return Some(Grade {
+                            name: name_str.to_string(),
+                            grade: grade.to_string(),
+                            credit: credit.to_string(),
+                            gpa: gpa_str.to_string(),
+                        });
                     }
-                    let credit_num: f64 = credit.parse().unwrap();
-                    let name_str = if credit_num >= 4.0 {
-                        name.purple()
-                    } else if credit_num >= 2.0 {
-                        name.blue()
-                    } else {
-                        name.white()
-                    };
-                    return Some(Grade {
-                        name: name_str.to_string(),
-                        grade: grade.to_string(),
-                        credit: credit.to_string(),
-                        gpa: gpa_str.to_string(),
-                    });
                 }
                 None
             })
             .collect();
-
+        let avg_gpa = weight_sum / credit_sum;
+        let avg_gpa_semester = weight_sum_semester / credit_sum_semester;
+        let avg_gpa_year = weight_sum_year / credit_sum_year;
         let table = create_table(&grade_list);
         println!("{}", table);
+        println!(
+            "学期均绩：{:.2}/{:.1}",
+            avg_gpa_semester, credit_sum_semester
+        );
+        println!("学年均绩：{:.2}/{:.1}", avg_gpa_year, credit_sum_year);
+        println!(" 总均绩 ：{:.2}/{:.1}", avg_gpa, credit_sum);
+
+
         Ok(())
     }
 }
@@ -1400,4 +1487,28 @@ fn create_table(data: &[Grade]) -> String {
         table.push_str(&separator);
     }
     table
+}
+
+fn format_gpa_str(gpa: f64) -> ColoredString {
+    if gpa <= 5.0 && gpa >= 4.5 {
+        format!("{:.1}", gpa).green()
+    } else if gpa < 4.5 && gpa >= 3.5 {
+        format!("{:.1}", gpa).cyan()
+    } else if gpa < 3.5 && gpa >= 2.4 {
+        format!("{:.1}", gpa).yellow()
+    } else if gpa < 2.4 && gpa > 0.0 {
+        format!("{:.1}", gpa).red()
+    } else {
+        format!("{:.1}", gpa).white()
+    }
+}
+
+fn format_class_name(name: &str, credit_num: f64) -> ColoredString {
+    if credit_num >= 4.0 {
+        name.purple()
+    } else if credit_num >= 2.0 {
+        name.blue()
+    } else {
+        name.white()
+    }
 }

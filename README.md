@@ -24,7 +24,8 @@ Options:
   -u, --upgrade  更新课程列表，有新课时用
   -w, --which    选择需要拉取的课程
   -t, --task     查看作业
-  -g, --grade    查看成绩
+      --grade    查看所有成绩
+      --g        查看本学期成绩
   -c, --config   配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
   -h, --help     Print help
   -V, --version  Print version

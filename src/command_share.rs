@@ -429,3 +429,8 @@ pub fn grade_core(config: &utils::Config, account: &account::Account, session: &
     try_or_throw!(session.get_grade(&config.courses,&account), "获取成绩列表");
     Ok(())
 }
+
+pub fn g_core(config: &utils::Config, account: &account::Account, session: &network::Session) -> Result<()> {
+    try_or_throw!(session.get_g(&config.courses,&account), "获取成绩列表");
+    Ok(())
+}

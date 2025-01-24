@@ -50,9 +50,12 @@ struct Cli {
     /// 查看作业
     #[arg(short, long)]
     task: bool,
-    /// 查看成绩
-    #[arg(short, long)]
+    /// 查看所有成绩
+    #[arg(long)]
     grade: bool,
+    /// 查看本学期成绩
+    #[arg(long)]
+    g:bool,
     /// 配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
     #[arg(short, long)]
     config: bool,
@@ -76,7 +79,10 @@ fn main() {
         command_blocking::config(&config, &mut settings, &mut accounts);
     } else if cli.grade {
         command_blocking::grade(&config, &default_account);
-    } else {
+    }else if cli.g{
+        command_blocking::g(&config, &default_account);
+    }
+     else {
         let mut pre_login_thread_wrapper = Some(command_async::pre_login(
             default_account,
             config.cookies.clone(),
@@ -132,7 +138,7 @@ fn main() {
                         });
                         command_async::task(&config, session);
                     }
-                    "grade" | "g" => {
+                    "grade" => {
                         let session = new_session.get_or_insert_with(|| {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
@@ -145,6 +151,20 @@ fn main() {
                             "获取默认账号"
                         );
                         command_async::grade(&config, &default_account, session);
+                    }
+                    "g" => {
+                        let session = new_session.get_or_insert_with(|| {
+                            begin!("登录");
+                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
+                            let session = handle.join().unwrap();
+                            end!("登录");
+                            session
+                        });
+                        let default_account = try_or_exit!(
+                            account::Account::get_default_account(&accounts, &settings.user),
+                            "获取默认账号"
+                        );
+                        command_async::g(&config, &default_account, session);
                     }
                     "config" | "c" => {
                         new_session = command_async::config(&config, &mut settings, &mut accounts);

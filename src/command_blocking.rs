@@ -133,3 +133,19 @@ pub fn grade(config: &utils::Config, default_account: &account::Account) {
 
     success!("GRADE");
 }
+
+pub fn g(config: &utils::Config, default_account: &account::Account) {
+    process!("GRADE");
+
+    begin!("登录");
+    let session = try_or_log!(
+        network::Session::try_new(config.cookies.clone()),
+        "创建会话"
+    );
+    try_or_log!(session.login(&default_account), "登录");
+    end!("登录");
+
+    command_share::g_core(config, default_account, &session).unwrap();
+
+    success!("GRADE");
+}

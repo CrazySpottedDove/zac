@@ -142,6 +142,7 @@ pub fn readin_storage_dir() -> String {
     // 使用 “列表” 补全类型，让用户可预览到所有可能的补全项
     let config = rustyline::Config::builder()
         .completion_type(CompletionType::List)
+        .check_cursor_position(false)
         .build();
     // 创建 Editor，使用自定义的 FilePathHelper
     let mut rl = Editor::<FilePathHelper, DefaultHistory>::with_config(config)
@@ -180,6 +181,7 @@ pub fn readin_path() -> PathBuf {
     // 使用 “列表” 补全类型，让用户可预览到所有可能的补全项
     let config = rustyline::Config::builder()
         .completion_type(CompletionType::List)
+        .check_cursor_position(false)
         .build();
     const EXPECTED_FILE_TYPES: &[&str] = &[
         "avi", "flv", "m4v", "mov", "mp4", "3gp", "3gpp", "mpg", "rm", "rmvb", "swf", "webm",
@@ -307,6 +309,7 @@ impl CommandEditor {
     pub fn build() -> rustyline::Editor<CommandHelper, FileHistory> {
         let config = rustyline::Config::builder()
             .completion_type(rustyline::CompletionType::List)
+            .check_cursor_position(false)
             .build();
         let mut rl = Editor::with_config(config).expect("创建 rustyline Editor 失败");
         rl.set_helper(Some(CommandHelper {
@@ -393,6 +396,7 @@ impl ConfigEditor {
     pub fn build() -> rustyline::Editor<ConfigHelper, FileHistory> {
         let config = rustyline::Config::builder()
             .completion_type(rustyline::CompletionType::List)
+            .check_cursor_position(false)
             .build();
         let mut rl = Editor::with_config(config).expect("创建 rustyline Editor 失败");
         rl.set_helper(Some(ConfigHelper {

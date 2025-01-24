@@ -106,3 +106,11 @@ pub fn grade(config: &utils::Config,account: &account::Account, session: &networ
 
     success!("GRADE");
 }
+
+pub fn g(config: &utils::Config,account: &account::Account, session: &network::Session) {
+    process!("GRADE");
+
+    try_or_log!(command_share::g_core(config,account, session), "GRADE");
+
+    success!("GRADE");
+}
