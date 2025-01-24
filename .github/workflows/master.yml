@@ -102,6 +102,13 @@ jobs:
           name: linux-binaries
           path: linux
 
+      - name: Check for existing tag
+        run: |
+          if git rev-parse "refs/tags/${{ github.ref }}" >/dev/null 2>&1; then
+            git tag -d ${{ github.ref }}
+            git push origin :refs/tags/${{ github.ref }}
+          fi
+
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1

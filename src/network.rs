@@ -958,7 +958,7 @@ impl Session {
                                         .filter(|hw| hw["is_in_progress"].as_bool().unwrap())
                                         .map(|hw| {
                                             let description_html = hw["data"]["description"].as_str().unwrap_or("");
-                                            let description = html2text::from_read(description_html.as_bytes(), 80);
+                                            let description = html2text::from_read(description_html.as_bytes(), 80).unwrap();
                                             let id = hw["id"].as_u64().unwrap();
                                             let ddl = format_ddl(hw["deadline"].as_str().unwrap());
                                             let status = hw["submitted"].as_bool().unwrap();

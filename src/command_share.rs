@@ -54,11 +54,11 @@ pub fn fetch_core(
 /// 9. 等待回复，报告结果
 pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result<()> {
     // 1. 异步实现获取最新作业列表
-    let path_courses = config.courses.clone();
+    let path_active_courses = config.active_courses.clone();
     let session_cloned = session.clone();
     let get_homework_list_thread: JoinHandle<Vec<network::Homework>> = thread::spawn(move || {
         let home_work_list = try_or_exit!(
-            session_cloned.get_homework_list(&path_courses),
+            session_cloned.get_homework_list(&path_active_courses),
             "获取作业列表"
         );
         home_work_list
@@ -265,6 +265,7 @@ pub fn config_core(
                     }
                 }
                 "storage_dir" | "s" => {
+                    println!("当前存储目录：{}", settings.storage_dir.display());
                     let storage_dir = completer::readin_storage_dir();
                     try_or_throw!(
                         utils::Settings::set_storage_dir(settings, &config.settings, &storage_dir),
@@ -416,7 +417,7 @@ pub fn which_core(config: &utils::Config) -> Result<()> {
 
 pub fn task_core(config: &utils::Config,session: &network::Session)->Result<()>{
     begin!("获取作业列表");
-    let homework_list = try_or_throw!(session.get_homework_list(&config.courses),"获取作业列表");
+    let homework_list = try_or_throw!(session.get_homework_list(&config.active_courses),"获取作业列表");
     end!("获取作业列表");
 
     for homework in homework_list{
