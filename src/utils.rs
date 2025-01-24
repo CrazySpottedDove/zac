@@ -11,7 +11,7 @@ pub const MAX_RETRIES: u64 = 3;
 macro_rules! success {
     ($($arg:tt)*) => ({
         use colored::*;
-        println!("{} {}","✓".green() ,format!($($arg)*));
+        println!("{}  {}","✓".green() ,format!($($arg)*));
     })
 }
 
@@ -20,7 +20,7 @@ macro_rules! success {
 macro_rules! error {
     ($($arg:tt)*) => ({
         use colored::*;
-        eprintln!("{} {}","✗".red() ,format!($($arg)*));
+        eprintln!("{}  {}","✗".red() ,format!($($arg)*));
     })
 }
 
@@ -29,7 +29,7 @@ macro_rules! error {
 macro_rules! warning {
     ($($arg:tt)*) => ({
         use colored::*;
-        println!("{} {}","!".yellow() ,format!($($arg)*));
+        println!("{}  {}","!".yellow() ,format!($($arg)*));
     })
 }
 
@@ -38,7 +38,7 @@ macro_rules! warning {
 macro_rules! process {
     ($($arg:tt)*) => ({
         use colored::*;
-        println!("{} {}","⚙".blue() ,format!($($arg)*));
+        println!("{}  {}","⚙".blue() ,format!($($arg)*));
     })
 }
 
@@ -65,9 +65,9 @@ macro_rules! end {
         use colored::*;
         use std::io::Write;
         #[cfg(not(debug_assertions))]
-        print!("\r{} {}\n","✓".green() ,format!($($arg)*));
+        print!("\r{}  {}\n","✓".green() ,format!($($arg)*));
         #[cfg(debug_assertions)]
-        print!("{} {}\n","✓".green() ,format!($($arg)*));
+        print!("{}  {}\n","✓".green() ,format!($($arg)*));
         std::io::stdout().flush().unwrap();
     })
 }

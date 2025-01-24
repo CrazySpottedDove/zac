@@ -147,7 +147,7 @@ fn main() {
                         command_async::grade(&config, &default_account, session);
                     }
                     "config" | "c" => {
-                        command_async::config(&config, &mut settings, &mut accounts);
+                        new_session = command_async::config(&config, &mut settings, &mut accounts);
                     }
 
                     "help" | "h" => {
