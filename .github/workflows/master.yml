@@ -2,16 +2,25 @@ name: Rust Multi-Platform Build/master
 
 on:
   push:
-    branches: [ "master" ]
-    # 新增：当推送 tag（如 v1.0.0）时触发
+    # 仅在推送符合 v*.*.* 格式的新标签时触发
     tags: [ 'v*.*.*' ]
-  pull_request:
-    branches: [ "master" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # 确保标签对应的提交来自 master
+  check-master:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure tag commit is on master
+        run: |
+          git fetch origin master
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/master)" ]; then
+            echo "Tag commit is not on master. Exiting."
+            exit 1
+          fi
   build-macos:
     name: Build for macOS
     runs-on: macos-latest
