@@ -31,3 +31,6 @@ path = "src/main.rs"
 [[bin]]
 name = "zacpb"
 path = "src/main.rs"
+
+[profile.release]
+panic = "abort"

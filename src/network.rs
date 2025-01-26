@@ -1033,7 +1033,7 @@ impl Session {
         );
 
         if !comment.is_empty() {
-            comment = format!("<p>{}<br><br></p>", comment);
+            comment = format!("<p>{}<br></p>", comment);
         }
         let payload = json!({
             "comment":comment,
@@ -1097,7 +1097,7 @@ impl Session {
         let filtered_semester_list = filter_latest_group(&semester_list);
         let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
             .iter()
-            .map(|semester| split_semester(semester).unwrap())
+            .map(|semester| split_semester(semester))
             .collect();
         let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
             .iter()
@@ -1114,9 +1114,11 @@ impl Session {
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
 
-        let all_grade_list: Vec<Grade> = json["data"]["list"]
-            .as_array()
-            .unwrap()
+        let Some(grade_json) = json["data"]["list"].as_array() else {
+            println!("{:#?}", json);
+            return Ok(());
+        };
+        let all_grade_list: Vec<Grade> = grade_json
             .iter()
             .filter_map(|grade_json| {
                 let obj = grade_json.as_object()?;
@@ -1176,7 +1178,7 @@ impl Session {
         let filtered_semester_list = filter_latest_group(&semester_list);
         let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
             .iter()
-            .map(|semester| split_semester(semester).unwrap())
+            .map(|semester| split_semester(semester))
             .collect();
         let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
             .iter()
@@ -1193,9 +1195,12 @@ impl Session {
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
 
-        let grade_list: Vec<Grade> = json["data"]["list"]
-            .as_array()
-            .unwrap()
+        let Some(grade_json) = json["data"]["list"].as_array() else {
+            println!("{:#?}", json);
+            return Ok(());
+        };
+
+        let grade_list: Vec<Grade> = grade_json
             .iter()
             .filter_map(|grade_json| {
                 let obj = grade_json.as_object()?;
@@ -1238,7 +1243,6 @@ impl Session {
         );
         println!("学年均绩：{:.2}/{:.1}", avg_gpa_year, credit_sum_year);
         println!(" 总均绩 ：{:.2}/{:.1}", avg_gpa, credit_sum);
-
 
         Ok(())
     }
@@ -1283,23 +1287,20 @@ pub struct Grade {
 }
 
 /// 拆分 "2024-2025春夏" => ("2024-2025", "春夏") 的辅助函数
-fn split_semester(semester: &str) -> Option<(&str, &str)> {
-    // 找到第一个出现的 '春', '夏', '秋', '冬', '短' 来分割
-    // 也可以直接通过一个固定规则：年-年前缀一般类似 "[数字]-[数字]"，剩下的就是后缀
-    // 这里为了简单，直接从第一个汉字处切割，实际可按需求改写
-    let chars: Vec<char> = semester.chars().collect();
-    for (i, c) in chars.iter().enumerate() {
-        if "春夏秋冬短".contains(*c) {
+///
+/// 这个函数非常脆弱，只有在 semester 的格式是 "xxxx-yyyy春夏" 的时候才能正常工作
+fn split_semester(semester: &str) -> (&str, &str) {
+    for (i, c) in semester.chars().enumerate() {
+        if "春夏秋冬短".contains(c) {
             // i 是后缀开始位置
-            return Some((&semester[..i], &semester[i..]));
+            return (&semester[..i], &semester[i..]);
         }
     }
-    None
+    panic!("无法拆分学期：{}", semester);
 }
 
-/// 将「年-年前缀」解析为一个便于比较的整型，例如 "2024-2025" => (2024, 2025)
+/// 将「年-年前缀」解析为一个便于比较的整型，"2024-2025" => 2024
 fn parse_year_prefix(prefix: &str) -> u32 {
-    // 假设前缀必然是 "xxxx-yyyy" 的格式
     let parts: Vec<&str> = prefix.split('-').collect();
     return parts[0].parse().unwrap();
 }
@@ -1329,14 +1330,10 @@ fn suffix_order(suffix: &str) -> (u8, u8) {
 fn filter_latest_group(semesters: &[String]) -> Vec<String> {
     let mut parsed = Vec::new();
     for sem in semesters {
-        if let Some((prefix, suffix)) = split_semester(sem) {
-            let year = parse_year_prefix(prefix); // 返回 u32
-            let (group, sub) = suffix_order(suffix); // 返回 (u8, u8)
-            parsed.push((sem.clone(), year, group, sub));
-        } else {
-            // 若无法拆分前缀或后缀，则视作year=0, group=0, sub=0
-            parsed.push((sem.clone(), 0, 0, 0));
-        }
+        let (prefix, suffix) = split_semester(sem);
+        let year = parse_year_prefix(prefix); // 返回 u32
+        let (group, sub) = suffix_order(suffix); // 返回 (u8, u8)
+        parsed.push((sem.clone(), year, group, sub));
     }
 
     // 1) 找出最大的年前缀
@@ -1366,9 +1363,7 @@ fn format_ddl(original_ddl: &str) -> String {
     use chrono::{DateTime, Utc};
     let time = DateTime::parse_from_rfc3339(original_ddl).unwrap();
     let time_utc: DateTime<Utc> = time.with_timezone(&Utc);
-
     let formatted_ddl = time_utc.format("ddl: %m-%d %H:%M %Y").to_string();
-
     formatted_ddl
 }
 
@@ -1417,22 +1412,17 @@ fn display_width(s: &str) -> usize {
         .sum()
 }
 
-fn calculate_column_widths(data: &[Grade], headers: &[&str]) -> Vec<usize> {
-    let mut widths = vec![0; headers.len()];
-
+fn calculate_column_widths(grades: &[Grade], headers: &[&str]) -> Vec<usize> {
     // 初始化列宽为标题的宽度
-    for (i, header) in headers.iter().enumerate() {
-        widths[i] = display_width(header);
-    }
+    let mut widths: Vec<usize> = headers.iter().map(|h| display_width(h)).collect();
 
     // 更新列宽为内容的最大宽度
-    for grade in data {
-        let columns = vec![&grade.name, &grade.grade, &grade.credit, &grade.gpa];
-
-        for (i, col) in columns.iter().enumerate() {
+    for grade in grades {
+        let columns = [&grade.name, &grade.grade, &grade.credit, &grade.gpa];
+        for (col, width) in columns.iter().zip(widths.iter_mut()) {
             let len = display_width(col);
-            if len > widths[i] {
-                widths[i] = len;
+            if len > *width {
+                *width = len;
             }
         }
     }
@@ -1440,29 +1430,26 @@ fn calculate_column_widths(data: &[Grade], headers: &[&str]) -> Vec<usize> {
 }
 
 fn create_table(data: &[Grade]) -> String {
-    let headers = ["课程", "成绩", "绩点", "学分"];
-    let column_widths = calculate_column_widths(data, &headers);
-
+    const HEADERS: [&str; 4] = ["课程", "成绩", "绩点", "学分"];
+    let column_widths = calculate_column_widths(data, &HEADERS);
     let mut table = String::new();
 
     // 构建分隔线
-    let separator = column_widths
-        .iter()
-        .map(|w| format!("+{}", "-".repeat(*w + 2)))
-        .collect::<String>()
-        + "+\n";
+    let total_length: usize = column_widths.iter().map(|w| 1 + w + 2).sum::<usize>() + 2;
+    let mut separator = String::with_capacity(total_length);
+    for &w in &column_widths {
+        separator.push('+');
+        separator.push_str(&"-".repeat(w + 2));
+    }
+    separator.push_str("+\n");
 
     // 添加表头
     table.push_str(&separator);
-    table.push_str("|");
-    for (i, header) in headers.iter().enumerate() {
-        let padded = format!(
-            " {:width$} ",
-            header,
-            width = column_widths[i] - wide_char_num(header)
-        );
+    table.push('|');
+    for (header, &width) in HEADERS.iter().zip(column_widths.iter()) {
+        let total_width = width - wide_char_num(header);
+        let padded = format!(" {:width$} |", header, width = total_width);
         table.push_str(&padded);
-        table.push('|');
     }
     table.push('\n');
     table.push_str(&separator);
@@ -1470,18 +1457,13 @@ fn create_table(data: &[Grade]) -> String {
     // 添加数据行
     for grade in data {
         table.push('|');
-        let columns = vec![&grade.name, &grade.grade, &grade.gpa, &grade.credit];
-
-        for (i, col) in columns.iter().enumerate() {
-            let padded = format!(
-                " {:width$} ",
-                col,
-                width = (column_widths[i].to_isize().unwrap() + width_shift(col))
-                    .to_usize()
-                    .unwrap()
-            );
+        let columns = [&grade.name, &grade.grade, &grade.gpa, &grade.credit];
+        for (col, &width) in columns.iter().zip(column_widths.iter()) {
+            let total_width = (width.to_isize().unwrap() + width_shift(col))
+                .to_usize()
+                .unwrap();
+            let padded = format!(" {:width$} |", col, width = total_width);
             table.push_str(&padded);
-            table.push('|');
         }
         table.push('\n');
         table.push_str(&separator);
@@ -1490,25 +1472,20 @@ fn create_table(data: &[Grade]) -> String {
 }
 
 fn format_gpa_str(gpa: f64) -> ColoredString {
-    if gpa <= 5.0 && gpa >= 4.5 {
-        format!("{:.1}", gpa).green()
-    } else if gpa < 4.5 && gpa >= 3.5 {
-        format!("{:.1}", gpa).cyan()
-    } else if gpa < 3.5 && gpa >= 2.4 {
-        format!("{:.1}", gpa).yellow()
-    } else if gpa < 2.4 && gpa > 0.0 {
-        format!("{:.1}", gpa).red()
-    } else {
-        format!("{:.1}", gpa).white()
+    let formatted_gpa = format!("{:.1}", gpa);
+    match gpa {
+        4.5..=5.0 => formatted_gpa.green(),
+        3.5..4.5 => formatted_gpa.cyan(),
+        2.4..3.5 => formatted_gpa.yellow(),
+        0.0..2.4 => formatted_gpa.red(),
+        _ => formatted_gpa.white(),
     }
 }
 
 fn format_class_name(name: &str, credit_num: f64) -> ColoredString {
-    if credit_num >= 4.0 {
-        name.purple()
-    } else if credit_num >= 2.0 {
-        name.blue()
-    } else {
-        name.white()
+    match credit_num {
+        4.0..=5.0 => name.purple(),
+        2.0..=3.0 => name.blue(),
+        _ => name.white(),
     }
 }
