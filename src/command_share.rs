@@ -12,22 +12,16 @@ use std::io::Write;
 use anyhow::Result;
 use std::thread::{self, JoinHandle};
 
-
-
-
 pub fn fetch_core(
     config: &utils::Config,
     settings: &utils::Settings,
     session: &network::Session,
     selected_courses: Vec<network::CourseFull>,
 ) -> Result<()> {
-
-
     let activity_upload_record = try_or_throw!(
         network::Session::load_activity_upload_record(&config.activity_upload_record),
         "加载已下载课件记录"
     );
-
 
     try_or_throw!(
         session.fetch_activity_uploads(
@@ -114,9 +108,10 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
 
     // 8. 发送上交作业请求
     begin!("上交作业");
-    session
-        .handin_homework(selected_homework.id, upload_file_id, comment)
-        .unwrap();
+    try_or_throw!(
+        session.handin_homework(selected_homework.id, upload_file_id, comment),
+        "上交作业"
+    );
     end!("上交作业");
 
     Ok(())
@@ -330,7 +325,7 @@ pub fn config_core(
                 "help" | "h" | "" => {
                     config_help();
                 }
-                _=>{
+                _ => {
                     warning!("未知的命令！");
                     config_help();
                 }
@@ -415,23 +410,34 @@ pub fn which_core(config: &utils::Config) -> Result<()> {
     Ok(())
 }
 
-pub fn task_core(config: &utils::Config,session: &network::Session)->Result<()>{
+pub fn task_core(config: &utils::Config, session: &network::Session) -> Result<()> {
     begin!("获取作业列表");
-    let homework_list = try_or_throw!(session.get_homework_list(&config.active_courses),"获取作业列表");
+    let homework_list = try_or_throw!(
+        session.get_homework_list(&config.active_courses),
+        "获取作业列表"
+    );
     end!("获取作业列表");
 
-    for homework in homework_list{
-        println!("  {}",homework.name);
+    for homework in homework_list {
+        println!("  {}", homework.name);
     }
     Ok(())
 }
 
-pub fn grade_core(config: &utils::Config, account: &account::Account, session: &network::Session) -> Result<()> {
-    try_or_throw!(session.get_grade(&config.courses,&account), "获取成绩列表");
+pub fn grade_core(
+    config: &utils::Config,
+    account: &account::Account,
+    session: &network::Session,
+) -> Result<()> {
+    try_or_throw!(session.get_grade(&config.courses, &account), "获取成绩列表");
     Ok(())
 }
 
-pub fn g_core(config: &utils::Config, account: &account::Account, session: &network::Session) -> Result<()> {
-    try_or_throw!(session.get_g(&config.courses,&account), "获取成绩列表");
+pub fn g_core(
+    config: &utils::Config,
+    account: &account::Account,
+    session: &network::Session,
+) -> Result<()> {
+    try_or_throw!(session.get_g(&config.courses, &account), "获取成绩列表");
     Ok(())
 }

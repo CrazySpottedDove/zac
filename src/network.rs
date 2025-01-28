@@ -452,51 +452,41 @@ impl Session {
                             }
                         };
 
-                    let mut local_tasks = Vec::new();
-
-                    for activity in activities {
-                        // 确保活动包含上传信息，否则跳过
-                        let uploads = match activity["uploads"].as_array() {
-                            Some(arr) => arr,
-                            None => continue,
-                        };
-
-                        for upload in uploads {
+                    let local_tasks: Vec<(String, String, u64, String)> = activities
+                        .iter()
+                        .filter_map(|activity| activity["uploads"].as_array())
+                        .flat_map(|uploads| uploads.iter())
+                        .filter_map(|upload| {
                             // 提取 reference_id，如果不存在则跳过
-                            let id = match upload["reference_id"].as_u64() {
-                                Some(id) => id,
-                                None => continue,
-                            };
-
-                            // 跳过已记录的上传
+                            let id = upload["reference_id"].as_u64()?;
                             if activity_upload_record.contains(&id) {
-                                continue;
+                                return None;
                             }
 
-                            // 提取文件名
-                            let name = upload["name"].as_str().unwrap_or("unnamed").to_string();
-
-                            // 提取并小写化文件扩展名
-                            let extension = PathBuf::from(&name)
-                                .extension()
-                                .and_then(|ext| ext.to_str())
-                                .unwrap_or("")
-                                .to_lowercase();
+                            // 提取文件名，如果不存在则使用默认值
+                            let name = upload["name"].as_str()?.to_string();
 
                             // 根据设置决定是否跳过 mp4 文件
-                            if settings.mp4_trashed && extension == "mp4" {
-                                continue;
+                            if settings.mp4_trashed
+                                && PathBuf::from(&name)
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    == "mp4"
+                            {
+                                return None;
                             }
 
-                            local_tasks.push((
+                            // 构建任务元组
+                            Some((
                                 selected_course.semester.clone(),
                                 selected_course.name.clone(),
                                 id,
                                 name,
-                            ));
-                        }
-                    }
-
+                            ))
+                        })
+                        .collect();
                     // 如果没有任务，则返回 None，否则返回任务列表
                     if local_tasks.is_empty() {
                         None
@@ -595,16 +585,20 @@ impl Session {
     ) -> Result<()> {
         let download_url = if is_pdf {
             let mut retries = 0;
-            let url;
             loop {
-                let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
+                let json:Value = self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
                         error!("json失败：{}", e);
                         Err(e)
                     })?;
 
-                if json["status"].as_str().unwrap() == "ready" {
-                    url = json["url"].as_str().unwrap().to_string();
-                    break;
+                let Some(status) = json["status"].as_str() else {
+                    return Err(anyhow::anyhow!("json 不含 status 字段"));
+                };
+                if status == "ready" {
+                    let Some(url) = json["url"].as_str() else {
+                        return Err(anyhow::anyhow!("json 不含 url 字段"));
+                    };
+                    break url.to_string();
                 }
 
                 retries += 1;
@@ -613,7 +607,6 @@ impl Session {
                     return Ok(());
                 }
             }
-            url
         } else {
             format!(
                 "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",
@@ -744,25 +737,26 @@ impl Session {
     ) -> Result<()> {
         let download_url = if is_pdf {
             let mut retries = 0;
-            let url;
             loop {
                 let json:Value=self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
                         error!("json失败：{}", e);
                         Err(e)
                     })?;
-
-                if json["status"].as_str().unwrap() == "ready" {
-                    url = json["url"].as_str().unwrap().to_string();
-                    break;
+                let Some(status) = json["status"].as_str() else {
+                    return Err(anyhow::anyhow!("json 不含 status 字段"));
+                };
+                if status == "ready" {
+                    let Some(url) = json["url"].as_str() else {
+                        return Err(anyhow::anyhow!("json 不含 url 字段"));
+                    };
+                    break url.to_string();
                 }
-
                 retries += 1;
                 if retries == 3 {
                     error!("雪灾浙大一直准备不好 {}", name);
                     return Ok(());
                 }
             }
-            url
         } else {
             format!(
                 "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",

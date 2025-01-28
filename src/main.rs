@@ -154,12 +154,10 @@ fn main() {
                             end!("登录");
                             session
                         });
-                        let default_account = try_or_exit!(
-                            account::Account::get_default_account(&accounts, &settings.user),
-                            "获取默认账号"
-                        );
 
-                        if let Err(e) = command_async::grade(&config, &default_account, session) {
+                        if let Err(e) =
+                            command_async::grade(&config, session, &accounts, &settings.user)
+                        {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
@@ -171,11 +169,10 @@ fn main() {
                             end!("登录");
                             session
                         });
-                        let default_account = try_or_exit!(
-                            account::Account::get_default_account(&accounts, &settings.user),
-                            "获取默认账号"
-                        );
-                        if let Err(e) = command_async::g(&config, &default_account, session) {
+
+                        if let Err(e) =
+                            command_async::g(&config, session, &accounts, &settings.user)
+                        {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
@@ -195,14 +192,8 @@ fn main() {
                         warning!("无效命令，请重新输入");
                     }
                 },
-                Err(rustyline::error::ReadlineError::Interrupted) => {
-                    #[cfg(feature = "pb")]
-                    success!("退出 zacpb");
-                    #[cfg(not(feature = "pb"))]
-                    success!("退出 zac");
-                    return;
-                }
-                Err(rustyline::error::ReadlineError::Eof) => {
+                Err(rustyline::error::ReadlineError::Interrupted)
+                | Err(rustyline::error::ReadlineError::Eof) => {
                     #[cfg(feature = "pb")]
                     success!("退出 zacpb");
                     #[cfg(not(feature = "pb"))]
@@ -216,5 +207,3 @@ fn main() {
         }
     }
 }
-
-

@@ -12,7 +12,7 @@ pub struct Account {
     pub password: String,
 }
 
-type Accounts = HashMap<String, Account>;
+pub type Accounts = HashMap<String, Account>;
 
 impl Account {
     /// 获取所有的已有账号!
