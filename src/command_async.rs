@@ -1,11 +1,12 @@
 use crate::{
-    account, command_share, error, network, process, success, try_or_exit, try_or_log, utils,
+    account, command_share, error, network, process, success, try_or_exit, utils,try_or_throw,
     warning,
 };
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread::{self, JoinHandle};
+use anyhow::Result;
 
 // 交互模式专用的预登录操作，希望减少用户等待登录时间
 pub fn pre_login(
@@ -25,10 +26,10 @@ pub fn pre_login(
 }
 
 /// 在 fetch 之前，应当保证预登录线程 join 成功或者现有 session 可用
-pub fn fetch(config: &utils::Config, settings: &utils::Settings, session: &network::Session) {
+pub fn fetch(config: &utils::Config, settings: &utils::Settings, session: &network::Session)->Result<()>{
     process!("FETCH");
 
-    let selected_courses = try_or_log!(
+    let selected_courses = try_or_throw!(
         network::Session::load_selected_courses(&config.selected_courses),
         "加载已选课程"
     );
@@ -37,38 +38,44 @@ pub fn fetch(config: &utils::Config, settings: &utils::Settings, session: &netwo
     if selected_courses.is_empty() {
         warning!("还没有已经选择的课程！");
         warning!("请运行 (which | w) 选择课程！");
-        return;
+        return Ok(());
     }
 
-    try_or_log!(
+    try_or_throw!(
         command_share::fetch_core(config, settings, session, selected_courses),
         "FETCH"
     );
 
     success!("FETCH");
+
+    Ok(())
 }
 
-pub fn submit(config: &utils::Config, session: &network::Session) {
+pub fn submit(config: &utils::Config, session: &network::Session)->Result<()>{
     process!("SUBMIT");
 
-    try_or_log!(command_share::submit_core(config, session), "SUBMIT");
+    try_or_throw!(command_share::submit_core(config, session), "SUBMIT");
 
     success!("SUBMIT");
+
+    Ok(())
 }
 
-pub fn upgrade(config: &utils::Config, session: &network::Session) {
+pub fn upgrade(config: &utils::Config, session: &network::Session)->Result<()> {
     process!("UPGRADE");
 
-    try_or_log!(command_share::upgrade_core(config, session), "UPGRADE");
+    try_or_throw!(command_share::upgrade_core(config, session), "UPGRADE");
 
     success!("UPGRADE");
+
+    Ok(())
 }
 
 pub fn config(
     config: &utils::Config,
     settings: &mut utils::Settings,
     accounts: &mut HashMap<String, account::Account>,
-) -> Option<network::Session> {
+) -> Result<Option<network::Session>> {
     process!("CONFIG");
 
     let new_session_wrapper = match command_share::config_core(config, settings, accounts) {
@@ -80,37 +87,45 @@ pub fn config(
     };
 
     success!("CONFIG");
-    new_session_wrapper
+    Ok(new_session_wrapper)
 }
 
-pub fn which(config: &utils::Config) {
+pub fn which(config: &utils::Config)->Result<()>{
     process!("WHICH");
 
-    try_or_log!(command_share::which_core(config), "WHICH");
+    try_or_throw!(command_share::which_core(config), "WHICH");
 
     success!("WHICH");
+
+    Ok(())
 }
 
-pub fn task(config: &utils::Config, session: &network::Session) {
+pub fn task(config: &utils::Config, session: &network::Session) ->Result<()>{
     process!("TASK");
 
-    try_or_log!(command_share::task_core(config, session), "TASK");
+    try_or_throw!(command_share::task_core(config, session), "TASK");
 
     success!("TASK");
+
+    Ok(())
 }
 
-pub fn grade(config: &utils::Config,account: &account::Account, session: &network::Session) {
+pub fn grade(config: &utils::Config,account: &account::Account, session: &network::Session) ->Result<()>{
     process!("GRADE");
 
-    try_or_log!(command_share::grade_core(config,account, session), "GRADE");
+    try_or_throw!(command_share::grade_core(config,account, session), "GRADE");
 
     success!("GRADE");
+
+    Ok(())
 }
 
-pub fn g(config: &utils::Config,account: &account::Account, session: &network::Session) {
+pub fn g(config: &utils::Config,account: &account::Account, session: &network::Session) ->Result<()>{
     process!("GRADE");
 
-    try_or_log!(command_share::g_core(config,account, session), "GRADE");
+    try_or_throw!(command_share::g_core(config,account, session), "GRADE");
 
     success!("GRADE");
+
+    Ok(())
 }

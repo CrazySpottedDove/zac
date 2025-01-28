@@ -13,11 +13,11 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::path::PathBuf;
 
-const COMMANDS: &[&str] = &[
+const MAIN_COMMANDS: &[&str] = &[
     "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "h", "f", "s", "u",
     "c", "w", "g", "t",
 ];
-const CONFIG_COMMANDS: &[&str] = &[
+const CONFIG_MAIN_COMMANDS: &[&str] = &[
     "help",
     "add-account",
     "remove-account",
@@ -231,17 +231,47 @@ pub fn readin_path() -> PathBuf {
     }
 }
 
-#[derive(Default)]
-struct CmdCompleter;
-impl Completer for CmdCompleter {
+pub fn build_generic_editor(commands:CommandType) -> rustyline::Editor<GenericHelper, FileHistory> {
+    let config = rustyline::Config::builder()
+        .completion_type(rustyline::CompletionType::List)
+        .check_cursor_position(false)
+        .build();
+    let mut rl = Editor::with_config(config).expect("创建 rustyline Editor 失败");
+    rl.set_helper(Some(GenericHelper {
+        completer: GenericCompleter::new(commands),
+    }));
+    rl
+}
+
+pub enum CommandType{
+    MainCommand,
+    ConfigCommand,
+}
+
+pub struct GenericCompleter {
+    commands: CommandType,
+}
+
+impl GenericCompleter {
+    pub fn new(commands: CommandType) -> Self {
+        Self { commands }
+    }
+}
+
+impl Completer for GenericCompleter {
     type Candidate = String;
     fn complete(
         &self,
         line: &str,
         _pos: usize,
         _ctx: &Context<'_>,
-    ) -> RResult<(usize, Vec<String>)> {
-        let candidates: Vec<String> = COMMANDS
+    ) -> RResult<(usize, Vec<Self::Candidate>)> {
+        let commands = match self.commands {
+            CommandType::MainCommand => MAIN_COMMANDS,
+            CommandType::ConfigCommand => CONFIG_MAIN_COMMANDS,
+        };
+        let candidates: Vec<String> =
+            commands
             .iter()
             .filter_map(|cmd| {
                 if cmd.starts_with(line) {
@@ -256,21 +286,22 @@ impl Completer for CmdCompleter {
     }
 }
 
-pub struct CommandHelper {
-    completer: CmdCompleter,
+pub struct GenericHelper {
+    completer: GenericCompleter,
 }
-
-impl Helper for CommandHelper {}
-impl Validator for CommandHelper {}
-impl Highlighter for CommandHelper {
+impl Validator for GenericHelper {}
+impl Highlighter for GenericHelper {
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
         // 使用 ANSI 转义序列设置提示的颜色
         Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint)) // 90 是灰色
     }
-
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
+        let commands = match self.completer.commands{
+            CommandType::MainCommand=>MAIN_COMMANDS,
+            CommandType::ConfigCommand=>CONFIG_MAIN_COMMANDS,
+        };
         // 检查输入是否完全匹配任何命令
-        if COMMANDS.contains(&line) {
+        if commands.contains(&line) {
             // 使用绿色高亮完全匹配的输入
             Cow::Owned(format!("\x1b[1;32m{}\x1b[0m", line)) // 加粗并设置为绿色
         } else {
@@ -278,130 +309,26 @@ impl Highlighter for CommandHelper {
         }
     }
 }
-impl Completer for CommandHelper {
+impl Hinter for GenericHelper {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
+        // 提取第一个候选项的剩余部分作为“Hint”
+        if let Ok((start, candidates)) = self.completer.complete(line, pos, ctx){
+            if !candidates.is_empty() {
+                let first = &candidates[0];
+                let hint = &first[pos - start..];
+                return Some(hint.to_string());
+            }
+        }
+        None
+    }
+}
+
+impl Completer for GenericHelper {
     type Candidate = String;
     fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> RResult<(usize, Vec<String>)> {
         self.completer.complete(line, pos, ctx)
     }
 }
-impl Hinter for CommandHelper {
-    type Hint = String;
-
-    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
-        // 提取第一个候选项的剩余部分作为“Hint”
-        if let Ok((start, candidates)) = self.completer.complete(line, pos, ctx) {
-            if !candidates.is_empty() {
-                let first = &candidates[0];
-                let hint = &first[pos - start..];
-                Some(hint.to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-
-pub struct CommandEditor;
-
-impl CommandEditor {
-    pub fn build() -> rustyline::Editor<CommandHelper, FileHistory> {
-        let config = rustyline::Config::builder()
-            .completion_type(rustyline::CompletionType::List)
-            .check_cursor_position(false)
-            .build();
-        let mut rl = Editor::with_config(config).expect("创建 rustyline Editor 失败");
-        rl.set_helper(Some(CommandHelper {
-            completer: CmdCompleter::default(),
-        }));
-        rl
-    }
-}
-
-#[derive(Default)]
-struct CfgCompleter;
-impl Completer for CfgCompleter {
-    type Candidate = String;
-    fn complete(
-        &self,
-        line: &str,
-        _pos: usize,
-        _ctx: &Context<'_>,
-    ) -> RResult<(usize, Vec<String>)> {
-        let candidates: Vec<String> = CONFIG_COMMANDS
-            .iter()
-            .filter_map(|cfg| {
-                if cfg.starts_with(line) {
-                    Some(cfg.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        // 从行首开始替换
-        Ok((0, candidates))
-    }
-}
-
-pub struct ConfigHelper {
-    completer: CfgCompleter,
-}
-
-impl Helper for ConfigHelper {}
-impl Validator for ConfigHelper {}
-impl Highlighter for ConfigHelper {
-    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        // 使用 ANSI 转义序列设置提示的颜色
-        Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint)) // 90 是灰色
-    }
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        // 检查输入是否完全匹配任何命令
-        if CONFIG_COMMANDS.contains(&line) {
-            // 使用绿色高亮完全匹配的输入
-            Cow::Owned(format!("\x1b[1;32m{}\x1b[0m", line)) // 加粗并设置为绿色
-        } else {
-            Cow::Borrowed(line)
-        }
-    }
-}
-impl Completer for ConfigHelper {
-    type Candidate = String;
-    fn complete(&self, line: &str, pos: usize, ctx: &Context<'_>) -> RResult<(usize, Vec<String>)> {
-        self.completer.complete(line, pos, ctx)
-    }
-}
-impl Hinter for ConfigHelper {
-    type Hint = String;
-
-    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
-        // 提取第一个候选项的剩余部分作为“Hint”
-        if let Ok((start, candidates)) = self.completer.complete(line, pos, ctx) {
-            if !candidates.is_empty() {
-                let first = &candidates[0];
-                let hint = &first[pos - start..];
-                Some(hint.to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-}
-
-pub struct ConfigEditor;
-
-impl ConfigEditor {
-    pub fn build() -> rustyline::Editor<ConfigHelper, FileHistory> {
-        let config = rustyline::Config::builder()
-            .completion_type(rustyline::CompletionType::List)
-            .check_cursor_position(false)
-            .build();
-        let mut rl = Editor::with_config(config).expect("创建 rustyline Editor 失败");
-        rl.set_helper(Some(ConfigHelper {
-            completer: CfgCompleter::default(),
-        }));
-        rl
-    }
-}
+impl Helper for GenericHelper {}

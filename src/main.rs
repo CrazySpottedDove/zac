@@ -55,7 +55,7 @@ struct Cli {
     grade: bool,
     /// 查看本学期成绩
     #[arg(long)]
-    g:bool,
+    g: bool,
     /// 配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
     #[arg(short, long)]
     config: bool,
@@ -79,10 +79,9 @@ fn main() {
         command_blocking::config(&config, &mut settings, &mut accounts);
     } else if cli.grade {
         command_blocking::grade(&config, &default_account);
-    }else if cli.g{
+    } else if cli.g {
         command_blocking::g(&config, &default_account);
-    }
-     else {
+    } else {
         let mut pre_login_thread_wrapper = Some(command_async::pre_login(
             default_account,
             config.cookies.clone(),
@@ -90,7 +89,7 @@ fn main() {
         let mut new_session = None;
         Cli::command().print_help().unwrap();
         process!("交互模式 Ctrl+C 退出");
-        let mut rl = completer::CommandEditor::build();
+        let mut rl = completer::build_generic_editor(completer::CommandType::MainCommand);
         loop {
             match rl.readline(&format!("{} > ", CMD_NAME.blue())) {
                 Ok(input) => match input.as_str() {
@@ -102,7 +101,9 @@ fn main() {
                             end!("登录");
                             session
                         });
-                        command_async::fetch(&config, &settings, session);
+                        if let Err(e) = command_async::fetch(&config, &settings, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "submit" | "s" => {
                         let session = new_session.get_or_insert_with(|| {
@@ -112,8 +113,9 @@ fn main() {
                             end!("登录");
                             session
                         });
-
-                        command_async::submit(&config, session);
+                        if let Err(e) = command_async::submit(&config, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "upgrade" | "u" => {
                         let session = new_session.get_or_insert_with(|| {
@@ -123,10 +125,14 @@ fn main() {
                             end!("登录");
                             session
                         });
-                        command_async::upgrade(&config, session);
+                        if let Err(e) = command_async::upgrade(&config, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "which" | "w" => {
-                        command_async::which(&config);
+                        if let Err(e) = command_async::which(&config) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "task" | "t" => {
                         let session = new_session.get_or_insert_with(|| {
@@ -136,7 +142,9 @@ fn main() {
                             end!("登录");
                             session
                         });
-                        command_async::task(&config, session);
+                        if let Err(e) = command_async::task(&config, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "grade" => {
                         let session = new_session.get_or_insert_with(|| {
@@ -150,7 +158,10 @@ fn main() {
                             account::Account::get_default_account(&accounts, &settings.user),
                             "获取默认账号"
                         );
-                        command_async::grade(&config, &default_account, session);
+
+                        if let Err(e) = command_async::grade(&config, &default_account, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "g" => {
                         let session = new_session.get_or_insert_with(|| {
@@ -164,10 +175,17 @@ fn main() {
                             account::Account::get_default_account(&accounts, &settings.user),
                             "获取默认账号"
                         );
-                        command_async::g(&config, &default_account, session);
+                        if let Err(e) = command_async::g(&config, &default_account, session) {
+                            eprintln!("::>_<:: {}", e);
+                        };
                     }
                     "config" | "c" => {
-                        new_session = command_async::config(&config, &mut settings, &mut accounts);
+                        match command_async::config(&config, &mut settings, &mut accounts) {
+                            Ok(s) => new_session = s,
+                            Err(e) => {
+                                eprintln!("::>_<:: {}", e)
+                            }
+                        };
                     }
 
                     "help" | "h" => {
@@ -198,3 +216,5 @@ fn main() {
         }
     }
 }
+
+

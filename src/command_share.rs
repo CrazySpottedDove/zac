@@ -168,7 +168,7 @@ pub fn config_core(
     let mut new_session_wrapper = None;
     let prompt = format!("{} > ", "(config)".blue());
     loop {
-        let mut rl = completer::ConfigEditor::build();
+        let mut rl = completer::build_generic_editor(completer::CommandType::ConfigCommand);
         match rl.readline(&prompt) {
             Ok(cmd) => match cmd.as_str() {
                 "add-account" | "a" => {

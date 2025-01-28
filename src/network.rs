@@ -51,7 +51,7 @@ fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
         .collect()
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 struct State {
     cookie_store: Arc<CookieStoreMutex>,
     path_cookies: PathBuf,
@@ -110,7 +110,7 @@ impl Drop for State {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Session {
     #[allow(dead_code)] // just make clippy happy
     state: Arc<State>,
@@ -946,8 +946,6 @@ impl Session {
                     let session = self.clone();
                     match session.client.get(&url).send(){
                         Ok(res)=> {
-                            // let text = res.text().unwrap();
-                            // match serde_json::from_str::<Value>(&text){
                             match res.json::<Value>(){
                             Ok(json)=>{
                                 if let Some(homeworks_unwashed) = json["homework_activities"].as_array(){
@@ -1261,7 +1259,7 @@ pub struct Course {
     pub name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CourseData {
     pub id: u64,
     pub name: String,
