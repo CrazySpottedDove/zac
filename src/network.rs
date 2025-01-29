@@ -1,7 +1,7 @@
 use crate::{
-    account, begin, end, error, process, success, try_or_exit, try_or_throw, utils, waiting,
-    warning,
+    account, begin, end, error, success, try_or_exit, try_or_throw, utils, waiting, warning,
 };
+
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -29,12 +29,17 @@ const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
 const HOME_URL: &str = "https://courses.zju.edu.cn";
 const GRADE_SERVICE_URL: &str = "http://appservice.zju.edu.cn/zdjw/cjcx/cjcxjg";
 const GRADE_URL: &str = "http://appservice.zju.edu.cn/zju-smartcampus/zdydjw/api/kkqk_cxXscjxx";
+const POST_URL: &str = "https://courses.zju.edu.cn/api/uploads";
+
 #[cfg(feature = "pb")]
 use {
     colored::*,
     indicatif::{MultiProgress, ProgressBar, ProgressStyle},
     std::io::Write,
 };
+
+#[cfg(debug_assertions)]
+use crate::process;
 
 fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
     let m = num::BigUint::parse_bytes(modulus.as_bytes(), 16).unwrap();
@@ -828,7 +833,7 @@ impl Session {
             "size": file_size,
             "source": ""
         });
-        const POST_URL: &str = "https://courses.zju.edu.cn/api/uploads";
+
         #[cfg(debug_assertions)]
         process!("已准备好发送上传请求");
 
@@ -954,57 +959,6 @@ impl Session {
                 for attempt in 1..=utils::MAX_RETRIES{
                     let session = self.clone();
                     match session.client.get(&url).send(){
-                        Ok(res)=> {
-                            match res.json::<Value>(){
-                            Ok(json)=>{
-                                if let Some(homeworks_unwashed) = json["homework_activities"].as_array(){
-                                    #[cfg(debug_assertions)]
-                                    success!("{}::homeworks", course.name);
-                                    homeworks.extend(homeworks_unwashed
-                                        .iter()
-                                        .filter(|hw| hw["is_in_progress"].as_bool().unwrap())
-                                        .map(|hw| {
-                                            let description_html = hw["data"]["description"].as_str().unwrap_or("");
-                                            let description = html2text::from_read(description_html.as_bytes(), 80).unwrap();
-                                            let id = hw["id"].as_u64().unwrap();
-                                            let ddl = format_ddl(hw["deadline"].as_str().unwrap());
-                                            let status = hw["submitted"].as_bool().unwrap();
-                                            use colored::Colorize;
-                                            let status_signal = if status {
-                                                "✓".green()
-                                            } else {
-                                                "!".yellow()
-                                            };
-                                            let ddl = if status{
-                                                ddl.green()
-                                            }else{
-                                                ddl.yellow()
-                                            };
-                                            let name = format!(
-                                                "{} {}::{}\n\t{}\n\t{}",
-                                                status_signal,
-                                                course.name,
-                                                hw["title"].as_str().unwrap(),
-                                                ddl,
-                                                description
-                                            );
-                                            Homework { id, name }
-                                        })
-                                        .collect::<Vec<Homework>>());
-                                    break;
-                                }
-                            },
-                            Err(e)=>{
-                                #[cfg(debug_assertions)]
-                                warning!(
-                                    "retry {}/{}: {} 的返回无法解析为 json: {}",
-                                    attempt,
-                                    utils::MAX_RETRIES,
-                                    course.name,
-                                    e
-                                );
-                            }
-                        }},
                         Err(e) => {
                             warning!(
                                 "retry {}/{}: {} 的请求失败: {}",
@@ -1013,7 +967,54 @@ impl Session {
                                 course.name,
                                 e
                             );
-                        }
+                        },
+                        Ok(res)=> {
+                            match res.json::<Value>(){
+                                Err(e)=>{
+                                    #[cfg(debug_assertions)]
+                                    warning!(
+                                        "retry {}/{}: {} 的返回无法解析为 json: {}",
+                                        attempt,
+                                        utils::MAX_RETRIES,
+                                        course.name,
+                                        e
+                                    );
+                                },
+                                Ok(json)=>{
+                                    if let Some(homeworks_unwashed) = json["homework_activities"].as_array(){
+                                        #[cfg(debug_assertions)]
+                                        success!("{}::homeworks", course.name);
+                                        homeworks.extend(homeworks_unwashed
+                                            .iter()
+                                            .filter(|hw| hw["is_in_progress"].as_bool().unwrap())
+                                            .map(|hw| {
+                                                let description_html = hw["data"]["description"].as_str().unwrap_or("");
+                                                let description = html2text::from_read(description_html.as_bytes(), 80).unwrap();
+                                                let id = hw["id"].as_u64().unwrap();
+                                                let ddl = format_ddl(hw["deadline"].as_str().unwrap());
+                                                let status = hw["submitted"].as_bool().unwrap();
+                                                use colored::Colorize;
+                                                let (status_signal,ddl) = if status {
+                                                    ("✓".green(), ddl.green())
+                                                } else {
+                                                    ("!".yellow(), ddl.yellow())
+                                                };
+                                                let name = format!(
+                                                    "{} {}::{}\n\t{}\n\t{}",
+                                                    status_signal,
+                                                    course.name,
+                                                    hw["title"].as_str().unwrap(),
+                                                    ddl,
+                                                    description
+                                                );
+                                                Homework { id, name }
+                                            })
+                                            .collect::<Vec<Homework>>());
+                                        break;
+                                    }
+                                },
+                            }
+                        },
                     }
                 }
                 if homeworks.is_empty(){
@@ -1060,32 +1061,24 @@ impl Session {
         for attempt in 1..=utils::MAX_RETRIES {
             res = self.client.post(&handin_url).json(&payload).send()?;
             let content = res.text()?;
-            match serde_json::from_str::<Value>(&content) {
-                Ok(json_unjudged) => {
-                    #[cfg(debug_assertions)]
-                    println!("SUBMIT POST response as JSON: {:#?}", json_unjudged);
-                    if json_unjudged["errors"].is_array() {
-                        error!("上交作业失败");
-                        return Ok(());
-                    }
-                    json = Some(json_unjudged);
-                    break;
+            if let Ok(json_unjudged) = serde_json::from_str::<Value>(&content) {
+                #[cfg(debug_assertions)]
+                println!("SUBMIT POST response as JSON: {:#?}", json_unjudged);
+                if json_unjudged["errors"].is_array() {
+                    return Err(anyhow!("上交作业失败"));
                 }
-                Err(_) => {
-                    #[cfg(debug_assertions)]
-                    warning!("POST attempt {}/{} Failed", attempt, utils::MAX_RETRIES);
-                }
+                json = Some(json_unjudged);
+                break;
             }
             #[cfg(debug_assertions)]
             warning!("retry {}/{}: 上传请求失败", attempt, utils::MAX_RETRIES);
         }
 
+        if json.is_none() {
+            return Err(anyhow!("上传作业失败"));
+        }
         #[cfg(debug_assertions)]
         process!("上交作业请求已被接受");
-        if json.is_none() {
-            error!("上传作业失败");
-        }
-
         Ok(())
     }
 

@@ -187,22 +187,17 @@ pub fn config_core(
                     {
                         Ok(Some(index)) => {
                             let user_to_delete = &users[index];
-
-                            match account::Account::remove_account(
+                            if let Some(new_default_account) = account::Account::remove_account(
                                 &config.accounts,
                                 &config.settings,
                                 accounts,
                                 settings,
                                 user_to_delete,
                             ) {
-                                Some(new_default_account) => {
-                                    new_session_wrapper =
-                                        Some(check_up::after_change_default_account(
-                                            config,
-                                            &new_default_account,
-                                        ))
-                                }
-                                None => {}
+                                new_session_wrapper = Some(check_up::after_change_default_account(
+                                    config,
+                                    &new_default_account,
+                                ))
                             }
                         }
                         _ => {
