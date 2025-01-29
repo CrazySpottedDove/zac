@@ -142,66 +142,82 @@ impl Session {
         Ok(Session { state, client })
     }
     fn login_core(&self, account: &account::Account) -> Result<()> {
-        let (execution, (modulus, exponent)) = rayon::join(
-            || {
-                let res = try_or_exit!(self.client.get(LOGIN_URL).send(), "连接登录页");
-                let text = res.text().unwrap();
-                let re =
-                    regex::Regex::new(r#"<input type="hidden" name="execution" value="(.*?)" />"#)
-                        .unwrap();
-                let execution = re
-                    .captures(&text)
-                    .and_then(|cap| cap.get(1).map(|m| m.as_str()))
-                    .ok_or(anyhow!("Execution value not found"))
-                    .unwrap()
-                    .to_string();
-                execution
-            },
-            || {
-                let res = try_or_exit!(self.client.get(PUBKEY_URL).send(), "获取公钥");
-                let json: Value = try_or_exit!(res.json(), "解析公钥");
-                let modulus = json["modulus"]
-                    .as_str()
-                    .ok_or(anyhow!("Modulus not found"))
-                    .unwrap()
-                    .to_string();
-                let exponent = json["exponent"]
-                    .as_str()
-                    .ok_or(anyhow!("Exponent not found"))
-                    .unwrap()
-                    .to_string();
-                (modulus, exponent)
-            },
-        );
+        for retry in 1..=utils::MAX_RETRIES {
+            let (execution, (modulus, exponent)) = rayon::join(
+                || {
+                    let res = try_or_exit!(self.client.get(LOGIN_URL).send(), "连接登录页");
+                    let text = res.text().unwrap();
+                    let re = regex::Regex::new(
+                        r#"<input type="hidden" name="execution" value="(.*?)" />"#,
+                    )
+                    .unwrap();
+                    let execution = re
+                        .captures(&text)
+                        .and_then(|cap| cap.get(1).map(|m| m.as_str()))
+                        .ok_or(anyhow!("Execution value not found"))
+                        .unwrap()
+                        .to_string();
+                    execution
+                },
+                || {
+                    let res = try_or_exit!(self.client.get(PUBKEY_URL).send(), "获取公钥");
+                    let json: Value = try_or_exit!(res.json(), "解析公钥");
+                    let modulus = json["modulus"]
+                        .as_str()
+                        .ok_or(anyhow!("Modulus not found"))
+                        .unwrap()
+                        .to_string();
+                    let exponent = json["exponent"]
+                        .as_str()
+                        .ok_or(anyhow!("Exponent not found"))
+                        .unwrap()
+                        .to_string();
+                    (modulus, exponent)
+                },
+            );
 
-        let rsapwd = rsa_no_padding(&account.password, &modulus, &exponent);
+            let rsapwd = rsa_no_padding(&account.password, &modulus, &exponent);
 
-        let params = [
-            ("username", account.stuid.as_str()),
-            ("password", &rsapwd),
-            ("execution", &execution),
-            ("_eventId", "submit"),
-            ("authcode", ""),
-            ("rememberMe", "true"),
-        ];
-        let res = try_or_throw!(self.client.post(LOGIN_URL).form(&params).send(), "提交登录");
-        #[cfg(debug_assertions)]
-        println!("{:?}", res);
-        if res.url().to_string() == "https://zjuam.zju.edu.cn/cas/login" {
-            return Err(anyhow!("请检查学号-密码正确性及你的网络连接状态"));
+            let params = [
+                ("username", account.stuid.as_str()),
+                ("password", &rsapwd),
+                ("execution", &execution),
+                ("_eventId", "submit"),
+                ("authcode", ""),
+                ("rememberMe", "true"),
+            ];
+            let res = try_or_throw!(self.client.post(LOGIN_URL).form(&params).send(), "提交登录");
+
+            #[cfg(debug_assertions)]
+            println!("{:?}", res);
+
+            if res
+                .url()
+                .to_string()
+                .contains("https://zjuam.zju.edu.cn/cas/login")
+            {
+                if retry == utils::MAX_RETRIES {
+                    return Err(anyhow!("请检查学号-密码正确性及你的网络连接状态"));
+                }
+                #[cfg(debug_assertions)]
+                warning!("retry {}/{}: 登录失败", retry, utils::MAX_RETRIES);
+                continue;
+            }
+
+            rayon::join(
+                || {
+                    try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
+                },
+                || {
+                    try_or_exit!(
+                        self.client.get(GRADE_SERVICE_URL).send(),
+                        "连接成绩查询主页"
+                    );
+                },
+            );
+
+            return Ok(());
         }
-
-        rayon::join(
-            || {
-                try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
-            },
-            || {
-                try_or_exit!(
-                    self.client.get(GRADE_SERVICE_URL).send(),
-                    "连接成绩查询主页"
-                );
-            },
-        );
         Ok(())
     }
 
@@ -844,39 +860,39 @@ impl Session {
 
         #[cfg(debug_assertions)]
         process!("上传请求已被接受");
-        if json.is_none() {
-            error!("上传请求失败");
-            return Ok(0);
-        }
 
-        let json = json.unwrap(); // 断言 json 已被赋值
+        let Some(json) = json else {
+            return Err(anyhow!("上传请求失败"));
+        };
+        let Some(upload_url) = json["upload_url"].as_str() else {
+            return Err(anyhow!("上传请求返回无 upload_url 字段"));
+        };
+        let Some(id) = json["id"].as_u64() else {
+            return Err(anyhow!("上传请求返回无 id 字段"));
+        };
+        let Some(file_name) = json["name"].as_str() else {
+            return Err(anyhow!("上传请求返回无 name 字段"));
+        };
 
-        let upload_url = json["upload_url"].as_str().unwrap();
-        let id = json["id"].as_u64().unwrap();
-        #[cfg(debug_assertions)]
-        println!("Upload URL: {}", upload_url);
-
+        // 转化文件内容为字节流
         let mut file = File::open(file_path)?;
         let mut file_content = Vec::new();
         file.read_to_end(&mut file_content)?;
-        let file_name = json["name"].as_str().unwrap();
-
         let file_part = multipart::Part::bytes(file_content)
             .file_name(file_name.to_string())
             .mime_str("application/octet-stream")?;
-
         let form = multipart::Form::new().part("file", file_part);
 
         let res = self.client.put(upload_url).multipart(form).send()?;
 
-        if res.status().is_success() {
-            #[cfg(debug_assertions)]
-            success!("上传文件");
-        } else {
+        if !res.status().is_success() {
             let status = res.status();
             let text = res.text().unwrap_or_default();
-            error!("上传状态码：{}，响应内容：{}", status, text);
+            return Err(anyhow!("上传状态码：{}，响应内容：{}", status, text));
         }
+
+        #[cfg(debug_assertions)]
+        success!("上传文件：{}", file_name);
 
         Ok(id)
     }

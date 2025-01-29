@@ -1,7 +1,6 @@
 use crate::utils::{MULTISELECT_PROMPT, SELECT_PROMPT};
 use crate::{
-    account, begin, check_up, completer, end, error, network, success, try_or_exit, try_or_throw,
-    utils, warning,
+    account, begin, check_up, completer, end, error, network, success, try_or_throw, utils, warning,
 };
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, MultiSelect, Select};
@@ -50,13 +49,14 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
     // 1. 异步实现获取最新作业列表
     let path_active_courses = config.active_courses.clone();
     let session_cloned = session.clone();
-    let get_homework_list_thread: JoinHandle<Vec<network::Homework>> = thread::spawn(move || {
-        let home_work_list = try_or_exit!(
-            session_cloned.get_homework_list(&path_active_courses),
-            "获取作业列表"
-        );
-        home_work_list
-    });
+    let get_homework_list_thread: JoinHandle<Result<Vec<network::Homework>>> =
+        thread::spawn(move || {
+            let home_work_list = try_or_throw!(
+                session_cloned.get_homework_list(&path_active_courses),
+                "获取作业列表"
+            );
+            Ok(home_work_list)
+        });
 
     // 2. 选择需要上传的文件
     let file_path = completer::readin_path();
@@ -65,14 +65,13 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
     }
 
     // 3. 异步实现上传文件到个人资料库
-    let file_path_cloned = file_path.clone();
     let session_cloned = session.clone();
-    let upload_file_thread: JoinHandle<u64> =
-        thread::spawn(move || session_cloned.upload_file(&file_path_cloned).unwrap());
+    let upload_file_thread: JoinHandle<Result<u64>> =
+        thread::spawn(move || session_cloned.upload_file(&file_path));
 
     // 4. 等待获取作业列表完成
     begin!("获取作业列表");
-    let homework_list = get_homework_list_thread.join().unwrap();
+    let homework_list = get_homework_list_thread.join().unwrap()?;
     end!("获取作业列表");
 
     // 5. 选择需要上交的作业
@@ -93,17 +92,12 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
     // 6. 询问是否备注
     let mut comment = String::new();
     println!("提交备注：(如不需要，直接回车)");
-    if std::io::stdin().read_line(&mut comment).is_err() {
-        return Err(anyhow::anyhow!("读取备注失败"));
-    }
+    std::io::stdin().read_line(&mut comment)?;
     comment = comment.trim().to_string();
 
     // 7. 等待上传文件完成
     begin!("上传文件到资料库");
-    let upload_file_id = upload_file_thread.join().unwrap();
-    if upload_file_id == 0 {
-        return Err(anyhow::anyhow!("上传文件到资料库失败"));
-    }
+    let upload_file_id = upload_file_thread.join().unwrap()?;
     end!("上传文件到资料库");
 
     // 8. 发送上交作业请求
@@ -122,7 +116,7 @@ pub fn upgrade_core(config: &utils::Config, session: &network::Session) -> Resul
     let semester_map = try_or_throw!(session.get_semester_map(), "获取学期映射表");
     let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
     end!("获取学期映射表 & 课程列表");
-    
+
     let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
     try_or_throw!(
         network::Session::store_semester_course_map(&config.courses, &semester_course_map),
@@ -206,7 +200,7 @@ pub fn config_core(
                                         Some(check_up::after_change_default_account(
                                             config,
                                             &new_default_account,
-                                        ));
+                                        ))
                                 }
                                 None => {}
                             }
@@ -277,21 +271,15 @@ pub fn config_core(
                         continue;
                     }
                     match is_pdf.trim() {
-                        "y" => {
-                            try_or_throw!(
-                                utils::Settings::set_mp4_trashed(settings, &config.settings, true),
-                                "设置是否跳过下载 mp4 文件"
-                            );
-                        }
-                        "n" => {
-                            try_or_throw!(
-                                utils::Settings::set_mp4_trashed(settings, &config.settings, false),
-                                "设置是否跳过下载 mp4 文件"
-                            );
-                        }
-                        _ => {
-                            warning!("输入无效");
-                        }
+                        "y" => try_or_throw!(
+                            utils::Settings::set_mp4_trashed(settings, &config.settings, true),
+                            "设置是否跳过下载 mp4 文件"
+                        ),
+                        "n" => try_or_throw!(
+                            utils::Settings::set_mp4_trashed(settings, &config.settings, false),
+                            "设置是否跳过下载 mp4 文件"
+                        ),
+                        _ => warning!("输入无效"),
                     }
                 }
                 "pdf-or-ppt" | "p" => {
@@ -303,21 +291,15 @@ pub fn config_core(
                         continue;
                     }
                     match is_pdf.trim() {
-                        "y" => {
-                            try_or_throw!(
-                                utils::Settings::set_is_pdf(settings, &config.settings, true),
-                                "设置下载 ppt 格式"
-                            );
-                        }
-                        "n" => {
-                            try_or_throw!(
-                                utils::Settings::set_is_pdf(settings, &config.settings, false),
-                                "设置下载 ppt 格式"
-                            );
-                        }
-                        _ => {
-                            warning!("输入无效");
-                        }
+                        "y" => try_or_throw!(
+                            utils::Settings::set_is_pdf(settings, &config.settings, true),
+                            "设置下载 ppt 格式"
+                        ),
+                        "n" => try_or_throw!(
+                            utils::Settings::set_is_pdf(settings, &config.settings, false),
+                            "设置下载 ppt 格式"
+                        ),
+                        _ => warning!("输入无效"),
                     }
                 }
                 "list-config" | "l" => {
