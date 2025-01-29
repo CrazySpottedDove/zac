@@ -185,25 +185,24 @@ impl Session {
             ("rememberMe", "true"),
         ];
         let res = try_or_throw!(self.client.post(LOGIN_URL).form(&params).send(), "提交登录");
-        if res.status().is_success() {
-            rayon::join(
-                || {
-                    try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
-                },
-                || {
-                    try_or_exit!(
-                        self.client.get(GRADE_SERVICE_URL).send(),
-                        "连接成绩查询主页"
-                    );
-                },
-            );
-            Ok(())
-        } else {
-            let status = res.status();
-            let text = res.text().unwrap_or_default();
-            error!("登录状态码：{}，响应内容：{}", status, text);
-            Err(anyhow!("登录失败"))
+        #[cfg(debug_assertions)]
+        println!("{:?}", res);
+        if res.url().to_string() == "https://zjuam.zju.edu.cn/cas/login" {
+            return Err(anyhow!("请检查学号-密码正确性及你的网络连接状态"));
         }
+
+        rayon::join(
+            || {
+                try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
+            },
+            || {
+                try_or_exit!(
+                    self.client.get(GRADE_SERVICE_URL).send(),
+                    "连接成绩查询主页"
+                );
+            },
+        );
+        Ok(())
     }
 
     /// 登录!
@@ -1081,9 +1080,26 @@ impl Session {
         });
         begin!("查询成绩");
         let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+        let json: Value = res.json()?;
+        let grade_json = match json["data"]["list"].as_array() {
+            Some(grade_json) => grade_json.to_owned(),
+            None => {
+                let again_res = try_or_throw!(
+                    self.client.get(GRADE_SERVICE_URL).send(),
+                    "连接成绩查询主页"
+                );
+                if again_res.url().query().map(|q| q.to_owned()).is_none() {
+                    let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+                    let json: Value = res.json()?;
+                    json["data"]["list"].as_array().unwrap().to_owned()
+                } else {
+                    println!("{:?}", again_res);
+                    return Err(anyhow!("无法获取成绩"));
+                }
+            }
+        };
         end!("查询成绩");
 
-        let json: Value = res.json()?;
         let semester_course_map = Session::load_semester_course_map(path_courses)?;
         let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
         let filtered_semester_list = filter_latest_group(&semester_list);
@@ -1106,10 +1122,6 @@ impl Session {
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
 
-        let Some(grade_json) = json["data"]["list"].as_array() else {
-            println!("{:#?}", json);
-            return Ok(());
-        };
         let all_grade_list: Vec<Grade> = grade_json
             .iter()
             .filter_map(|grade_json| {
@@ -1162,9 +1174,26 @@ impl Session {
         });
         begin!("查询成绩");
         let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+        let json: Value = res.json()?;
+        let grade_json = match json["data"]["list"].as_array() {
+            Some(grade_json) => grade_json.to_owned(),
+            None => {
+                let again_res = try_or_throw!(
+                    self.client.get(GRADE_SERVICE_URL).send(),
+                    "连接成绩查询主页"
+                );
+                if again_res.url().query().map(|q| q.to_owned()).is_none() {
+                    let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+                    let json: Value = res.json()?;
+                    json["data"]["list"].as_array().unwrap().to_owned()
+                } else {
+                    println!("{:?}", again_res);
+                    return Err(anyhow!("无法获取成绩"));
+                }
+            }
+        };
         end!("查询成绩");
 
-        let json: Value = res.json()?;
         let semester_course_map = Session::load_semester_course_map(path_courses)?;
         let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
         let filtered_semester_list = filter_latest_group(&semester_list);
@@ -1186,11 +1215,6 @@ impl Session {
         let mut credit_sum_semester = 0.0;
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
-
-        let Some(grade_json) = json["data"]["list"].as_array() else {
-            println!("{:#?}", json);
-            return Ok(());
-        };
 
         let grade_list: Vec<Grade> = grade_json
             .iter()

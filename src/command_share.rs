@@ -118,10 +118,11 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
 }
 
 pub fn upgrade_core(config: &utils::Config, session: &network::Session) -> Result<()> {
+    begin!("获取学期映射表 & 课程列表");
     let semester_map = try_or_throw!(session.get_semester_map(), "获取学期映射表");
-
     let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
-
+    end!("获取学期映射表 & 课程列表");
+    
     let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
     try_or_throw!(
         network::Session::store_semester_course_map(&config.courses, &semester_course_map),
