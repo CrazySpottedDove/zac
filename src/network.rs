@@ -1073,12 +1073,8 @@ impl Session {
         Ok(())
     }
 
-    /// 获取成绩 并打印全部
-    pub fn get_grade(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
-        let form = json!({
-            "xh":account.stuid
-        });
-        begin!("查询成绩");
+    /// 查询成绩的核心内容
+    fn query_grades(&self, form: Value) -> Result<Vec<Value>> {
         let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
         let json: Value = res.json()?;
         let grade_json = match json["data"]["list"].as_array() {
@@ -1089,7 +1085,8 @@ impl Session {
                     "连接成绩查询主页"
                 );
                 if again_res.url().query().map(|q| q.to_owned()).is_none() {
-                    let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
+                    let res =
+                        try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
                     let json: Value = res.json()?;
                     json["data"]["list"].as_array().unwrap().to_owned()
                 } else {
@@ -1098,6 +1095,16 @@ impl Session {
                 }
             }
         };
+        Ok(grade_json)
+    }
+
+    /// 获取成绩 并打印全部
+    pub fn get_grade(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
+        let form = json!({
+            "xh":account.stuid
+        });
+        begin!("查询成绩");
+        let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
         let semester_course_map = Session::load_semester_course_map(path_courses)?;
@@ -1173,25 +1180,7 @@ impl Session {
             "xh":account.stuid
         });
         begin!("查询成绩");
-        let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
-        let json: Value = res.json()?;
-        let grade_json = match json["data"]["list"].as_array() {
-            Some(grade_json) => grade_json.to_owned(),
-            None => {
-                let again_res = try_or_throw!(
-                    self.client.get(GRADE_SERVICE_URL).send(),
-                    "连接成绩查询主页"
-                );
-                if again_res.url().query().map(|q| q.to_owned()).is_none() {
-                    let res = try_or_throw!(self.client.post(GRADE_URL).form(&form).send(), "查询成绩");
-                    let json: Value = res.json()?;
-                    json["data"]["list"].as_array().unwrap().to_owned()
-                } else {
-                    println!("{:?}", again_res);
-                    return Err(anyhow!("无法获取成绩"));
-                }
-            }
-        };
+        let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
         let semester_course_map = Session::load_semester_course_map(path_courses)?;
