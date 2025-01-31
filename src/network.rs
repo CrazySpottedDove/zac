@@ -33,7 +33,6 @@ const POST_URL: &str = "https://courses.zju.edu.cn/api/uploads";
 
 #[cfg(feature = "pb")]
 use {
-    colored::*,
     indicatif::{MultiProgress, ProgressBar, ProgressStyle},
     std::io::Write,
 };
@@ -56,21 +55,22 @@ fn rsa_no_padding(src: &str, modulus: &str, exponent: &str) -> String {
         .collect()
 }
 
-// #[derive(Debug)]
+/// 会话状态
 struct State {
+    /// 共享 cookie 状态
     cookie_store: Arc<CookieStoreMutex>,
+    /// 本地 cookie 文件路径
     path_cookies: PathBuf,
 }
 
 impl State {
-    /// 建立新的 cookie_store
-    pub fn try_new(path_cookies: PathBuf) -> anyhow::Result<State> {
+    /// 建立新的 state
+    ///
+    /// 使用可能已经存在的本地 cookie 文件。若没有，会自动创建
+    pub fn try_new(path_cookies: PathBuf) -> Result<State> {
         #[allow(deprecated)]
         let cookie_store = match File::open(&path_cookies) {
-            Ok(file) => match CookieStore::load_json(std::io::BufReader::new(file)) {
-                Ok(cookie_store) => cookie_store,
-                Err(_) => CookieStore::default(),
-            },
+            Ok(file) => CookieStore::load_json(std::io::BufReader::new(file)).unwrap_or_default(),
             Err(_) => {
                 File::create(&path_cookies)?;
                 CookieStore::default()
@@ -81,6 +81,13 @@ impl State {
             cookie_store,
             path_cookies,
         })
+    }
+
+    /// 清除当前 cookie 和本地 cookie
+    pub fn clear_cookie(&self) -> Result<()> {
+        self.cookie_store.lock().unwrap().clear();
+        fs::remove_file(&self.path_cookies)?;
+        Ok(())
     }
 }
 
@@ -116,15 +123,28 @@ impl Drop for State {
 }
 
 #[derive(Clone)]
+/// 网络会话
+///
+/// 自动管理会话 cookie 并在销毁时保存 cookie 到本地
 pub struct Session {
     #[allow(dead_code)] // just make clippy happy
     state: Arc<State>,
     client: Client,
+    path_courses: PathBuf,
+    path_active_courses: PathBuf,
+    path_selected_courses: PathBuf,
+    path_activity_upload_record: PathBuf,
 }
 
 impl Session {
-    /// 建立新的会话!
-    pub fn try_new(path_cookies: PathBuf) -> Result<Session> {
+    /// 建立新的会话
+    pub fn try_new(
+        path_cookies: PathBuf,
+        path_courses: PathBuf,
+        path_active_courses: PathBuf,
+        path_selected_courses: PathBuf,
+        path_activity_upload_record: PathBuf,
+    ) -> Result<Session> {
         let state = State::try_new(path_cookies)?;
         let state = Arc::new(state);
         let mut headers = HeaderMap::new();
@@ -144,9 +164,10 @@ impl Session {
         #[cfg(debug_assertions)]
         success!("建立会话");
 
-        Ok(Session { state, client })
+        Ok(Session { state, client, path_courses, path_active_courses, path_selected_courses, path_activity_upload_record })
     }
-    fn login_core(&self, account: &account::Account) -> Result<()> {
+
+    fn login_core(&self, account: &account::AccountData) -> Result<()> {
         for retry in 1..=utils::MAX_RETRIES {
             let (execution, (modulus, exponent)) = rayon::join(
                 || {
@@ -226,8 +247,8 @@ impl Session {
         Ok(())
     }
 
-    /// 登录!
-    pub fn login(&self, account: &account::Account) -> Result<()> {
+    /// 登录，使用本地 cookie
+    pub fn login(&self, account: &account::AccountData) -> Result<()> {
         let (zcourse_query_wrapper, zgrade_query_wrapper) = rayon::join(
             || {
                 let res = try_or_exit!(self.client.get(HOME_URL).send(), "连接雪灾浙大主页");
@@ -247,13 +268,13 @@ impl Session {
         self.login_core(account)
     }
 
-    /// 重新登录!
-    pub fn relogin(&self, account: &account::Account) -> Result<()> {
-        self.state.cookie_store.lock().unwrap().clear();
+    /// 清除本地 cookie 并重新登录
+    pub fn relogin(&self, account: &account::AccountData) -> Result<()> {
+        try_or_throw!(self.state.clear_cookie(), "清除 cookie");
         self.login_core(account)
     }
 
-    /// 获取学期映射表!
+    /// 获取学期映射表(id -> name)
     pub fn get_semester_map(&self) -> Result<HashMap<u64, String>> {
         let res = self
             .client
@@ -276,14 +297,15 @@ impl Session {
         semester_map
     }
 
-    /// 获取课程列表!
+    /// 获取课程列表
     pub fn get_course_list(&self) -> Result<Vec<Course>> {
         let res = self.client.get("https://courses.zju.edu.cn/api/my-courses?conditions=%7B%22status%22:%5B%22ongoing%22,%22notStarted%22%5D,%22keyword%22:%22%22,%22classify_type%22:%22recently_started%22,%22display_studio_list%22:false%7D&fields=id,name,semester_id&page=1&page_size=1000").send()?;
 
         let json: Value = res.json()?;
-        let course_list: Vec<Course> = json["courses"]
-            .as_array()
-            .unwrap()
+        let Some(courses_json) = json["courses"].as_array() else {
+            return Err(anyhow!("返回 json 无 courses 字段"));
+        };
+        let course_list: Vec<Course> = courses_json
             .iter()
             .map(|c| Course {
                 id: c["id"].as_u64().unwrap(),
@@ -296,6 +318,7 @@ impl Session {
         Ok(course_list)
     }
 
+    /// 根据课程数组和学期映射表，构建 学期->课程 映射表
     pub fn to_semester_course_map(
         course_list: Vec<Course>,
         semester_map: HashMap<u64, String>,
@@ -315,13 +338,14 @@ impl Session {
         }
         semester_course_map
     }
-    /// 存储学期-课程映射表!
+
+    /// 存储学期-课程映射表
     pub fn store_semester_course_map(
-        path_courses: &PathBuf,
+        &self,
         semester_course_map: &HashMap<String, Vec<CourseData>>,
     ) -> Result<()> {
         std::fs::write(
-            path_courses,
+            &self.path_courses,
             serde_json::to_string(&semester_course_map).unwrap(),
         )?;
 
@@ -331,22 +355,17 @@ impl Session {
     }
 
     /// 加载学期-课程映射表!
-    pub fn load_semester_course_map(
-        path_courses: &PathBuf,
-    ) -> Result<HashMap<String, Vec<CourseData>>> {
-        let data = fs::read_to_string(path_courses)?;
+    pub fn load_semester_course_map(&self) -> Result<HashMap<String, Vec<CourseData>>> {
+        let data = fs::read_to_string(&self.path_courses)?;
         let semester_course_map: HashMap<String, Vec<CourseData>> = serde_json::from_str(&data)?;
 
         Ok(semester_course_map)
     }
 
     /// 存储已选课程!
-    pub fn store_selected_courses(
-        path_selected_courses: &PathBuf,
-        selected_courses: &Vec<CourseFull>,
-    ) -> Result<()> {
+    pub fn store_selected_courses(&self, selected_courses: &Vec<CourseFull>) -> Result<()> {
         std::fs::write(
-            path_selected_courses,
+            &self.path_selected_courses,
             serde_json::to_string(selected_courses)?,
         )?;
 
@@ -356,8 +375,8 @@ impl Session {
     }
 
     /// 加载已选课程!
-    pub fn load_selected_courses(path_selected_courses: &PathBuf) -> Result<Vec<CourseFull>> {
-        let data = fs::read_to_string(path_selected_courses)?;
+    pub fn load_selected_courses(&self) -> Result<Vec<CourseFull>> {
+        let data = fs::read_to_string(&self.path_selected_courses)?;
         let selected_courses: Vec<CourseFull> = serde_json::from_str(&data)?;
 
         #[cfg(debug_assertions)]
@@ -367,25 +386,22 @@ impl Session {
     }
 
     /// 存储已下载课件记录!
-    pub fn store_activity_upload_record(
-        path_activity_upload_record: &PathBuf,
-        activity_upload_record: &Vec<u64>,
-    ) -> Result<()> {
+    pub fn store_activity_upload_record(&self, activity_upload_record: &Vec<u64>) -> Result<()> {
         std::fs::write(
-            path_activity_upload_record,
+            &self.path_activity_upload_record,
             serde_json::to_string(activity_upload_record)?,
         )?;
 
         success!(
             "存储已下载课件记录 -> {}",
-            path_activity_upload_record.display()
+            &self.path_activity_upload_record.display()
         );
         Ok(())
     }
 
     /// 加载已下载课件记录!
-    pub fn load_activity_upload_record(path_activity_upload_record: &PathBuf) -> Result<Vec<u64>> {
-        let data = fs::read_to_string(path_activity_upload_record)?;
+    pub fn load_activity_upload_record(&self) -> Result<Vec<u64>> {
+        let data = fs::read_to_string(&self.path_activity_upload_record)?;
         let activity_upload_record: Vec<u64> = serde_json::from_str(&data)?;
 
         #[cfg(debug_assertions)]
@@ -528,8 +544,6 @@ impl Session {
     #[cfg(feature = "pb")]
     pub fn fetch_activity_uploads(
         &self,
-        path_download: &PathBuf,
-        path_activity_upload_record: &PathBuf,
         selected_courses: Vec<CourseFull>,
         mut activity_upload_record: Vec<u64>,
         settings: &utils::Settings,
@@ -562,9 +576,8 @@ impl Session {
                     let pb = multi_pb.add(ProgressBar::new(0));
                     pb.set_style(pb_style.clone());
                     pb.set_message(format!("{} {}", "⚙".blue(), file_name));
-                    match Session::download_upload(
-                        self,
-                        &path_download.join(semester).join(course_name),
+                    match self.download_upload(
+                        &settings.storage_dir.join(semester).join(course_name),
                         *upload_id,
                         file_name,
                         settings.is_pdf,
@@ -580,10 +593,7 @@ impl Session {
                 .collect();
             if !successful_uploads.is_empty() {
                 activity_upload_record.extend(successful_uploads);
-                match Session::store_activity_upload_record(
-                    path_activity_upload_record,
-                    &activity_upload_record,
-                ) {
+                match self.store_activity_upload_record(&activity_upload_record) {
                     Ok(_) => {}
                     Err(e) => error!("存储下载课件记录：{}", e),
                 }
@@ -686,8 +696,6 @@ impl Session {
     #[cfg(not(feature = "pb"))]
     pub fn fetch_activity_uploads(
         &self,
-        path_download: &PathBuf,
-        path_activity_upload_record: &PathBuf,
         selected_courses: Vec<CourseFull>,
         mut activity_upload_record: Vec<u64>,
         settings: &utils::Settings,
@@ -715,7 +723,7 @@ impl Session {
                     process!("{} :: {}", course_name, file_name);
 
                     match self.download_upload(
-                        &path_download.join(semester).join(course_name),
+                        &settings.storage_dir.join(semester).join(course_name),
                         *upload_id,
                         file_name,
                         settings.is_pdf,
@@ -731,10 +739,7 @@ impl Session {
             if !successful_uploads.is_empty() {
                 success!("拉取新课件");
                 activity_upload_record.extend(successful_uploads);
-                match Session::store_activity_upload_record(
-                    path_activity_upload_record,
-                    &activity_upload_record,
-                ) {
+                match self.store_activity_upload_record(&activity_upload_record) {
                     Ok(_) => {}
                     Err(e) => error!("存储下载课件记录：{}", e),
                 }
@@ -919,8 +924,8 @@ impl Session {
     }
 
     /// 加载活跃课程
-    pub fn load_active_courses(path_active_courses: &PathBuf) -> Result<Vec<CourseData>> {
-        let data = fs::read_to_string(path_active_courses)?;
+    pub fn load_active_courses(&self) -> Result<Vec<CourseData>> {
+        let data = fs::read_to_string(&self.path_active_courses)?;
         let active_courses: Vec<CourseData> = serde_json::from_str(&data)?;
 
         #[cfg(debug_assertions)]
@@ -930,11 +935,11 @@ impl Session {
     }
 
     /// 存储活跃课程
-    pub fn store_active_courses(
-        path_active_courses: &PathBuf,
-        active_courses: &Vec<CourseData>,
-    ) -> Result<()> {
-        fs::write(path_active_courses, serde_json::to_string(active_courses)?)?;
+    pub fn store_active_courses(&self, active_courses: &Vec<CourseData>) -> Result<()> {
+        fs::write(
+            &self.path_active_courses,
+            serde_json::to_string(active_courses)?,
+        )?;
 
         #[cfg(debug_assertions)]
         success!("存储活跃课程");
@@ -945,11 +950,8 @@ impl Session {
     /// 获取作业列表
     ///
     /// homework: id, name, ddl, description
-    pub fn get_homework_list(&self, path_active_courses: &PathBuf) -> Result<Vec<Homework>> {
-        let courses = try_or_throw!(
-            Session::load_active_courses(path_active_courses),
-            "加载活跃课程"
-        );
+    pub fn get_homework_list(&self) -> Result<Vec<Homework>> {
+        let courses = try_or_throw!(self.load_active_courses(), "加载活跃课程");
         let num = courses.len();
         let pool = ThreadPoolBuilder::new().num_threads(num).build()?;
         let all_homeworks :Vec<Homework> = pool.install(||{
@@ -1108,7 +1110,7 @@ impl Session {
     }
 
     /// 获取成绩 并打印全部
-    pub fn get_grade(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
+    pub fn get_grade(&self, account: &account::AccountData) -> Result<()> {
         let form = json!({
             "xh":account.stuid
         });
@@ -1116,7 +1118,7 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let semester_course_map = Session::load_semester_course_map(path_courses)?;
+        let semester_course_map = self.load_semester_course_map()?;
         let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
         let filtered_semester_list = filter_latest_group(&semester_list);
         let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
@@ -1184,7 +1186,7 @@ impl Session {
     }
 
     /// 获取成绩 并打印本学期
-    pub fn get_g(&self, path_courses: &PathBuf, account: &account::Account) -> Result<()> {
+    pub fn get_g(&self, account: &account::AccountData) -> Result<()> {
         let form = json!({
             "xh":account.stuid
         });
@@ -1192,7 +1194,7 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let semester_course_map = Session::load_semester_course_map(path_courses)?;
+        let semester_course_map = self.load_semester_course_map()?;
         let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
         let filtered_semester_list = filter_latest_group(&semester_list);
         let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list

@@ -1,14 +1,10 @@
-mod account;
-mod check_up;
-mod command_async;
-mod command_blocking;
-mod command_share;
-mod completer;
-mod network;
-mod utils;
-
 use clap::{ArgGroup, CommandFactory, Parser};
 use colored::Colorize;
+use zac::check_up;
+use zac::command_async;
+use zac::command_blocking;
+use zac::completer;
+use zac::{begin, end, error, process, success, warning};
 
 #[cfg(feature = "pb")]
 const CMD_NAME: &str = "zacpb";
@@ -62,31 +58,31 @@ struct Cli {
 }
 
 fn main() {
-    let (config, mut settings, mut accounts, default_account) = check_up::all_up();
+    let (mut settings, mut account, session) = check_up::all_up();
     let cli = Cli::parse();
 
     if cli.fetch {
-        command_blocking::fetch(&config, &settings, &default_account);
+        command_blocking::fetch(&account.default, &settings, &session);
     } else if cli.submit {
-        command_blocking::submit(&config, &default_account);
+        command_blocking::submit(&session, &account.default);
     } else if cli.upgrade {
-        command_blocking::upgrade(&config, &default_account);
+        command_blocking::upgrade(&session, &account.default);
     } else if cli.which {
-        command_blocking::which(&config);
+        command_blocking::which(&session);
     } else if cli.task {
-        command_blocking::task(&config, &default_account);
+        command_blocking::task(&session, &account.default);
     } else if cli.config {
-        command_blocking::config(&config, &mut settings, &mut accounts);
+        command_blocking::config(&mut settings, &mut account, &session);
     } else if cli.grade {
-        command_blocking::grade(&config, &default_account);
+        command_blocking::grade(&session, &account.default);
     } else if cli.g {
-        command_blocking::g(&config, &default_account);
+        command_blocking::g(&session, &account.default);
     } else {
         let mut pre_login_thread_wrapper = Some(command_async::pre_login(
-            default_account,
-            config.cookies.clone(),
+            account.default.clone(),
+            session.clone(),
         ));
-        let mut new_session = None;
+        let mut login_ready = false;
         Cli::command().print_help().unwrap();
         process!("交互模式 Ctrl+C 退出");
         let mut rl = completer::build_generic_editor(completer::CommandType::MainCommand);
@@ -94,94 +90,89 @@ fn main() {
             match rl.readline(&format!("{} > ", CMD_NAME.blue())) {
                 Ok(input) => match input.as_str() {
                     "fetch" | "f" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
-                        if let Err(e) = command_async::fetch(&config, &settings, session) {
+                            login_ready = true;
+                        }
+
+                        if let Err(e) = command_async::fetch(&settings, &session) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "submit" | "s" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
-                        if let Err(e) = command_async::submit(&config, session) {
+                            login_ready = true;
+                        }
+                        if let Err(e) = command_async::submit(&session) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "upgrade" | "u" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
-                        if let Err(e) = command_async::upgrade(&config, session) {
+                            login_ready = true;
+                        }
+                        if let Err(e) = command_async::upgrade(&session) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "which" | "w" => {
-                        if let Err(e) = command_async::which(&config) {
+                        if let Err(e) = command_async::which(&session) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "task" | "t" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
-                        if let Err(e) = command_async::task(&config, session) {
+                            login_ready = true;
+                        }
+                        if let Err(e) = command_async::task(&session) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "grade" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
+                            login_ready = true;
+                        }
 
-                        if let Err(e) =
-                            command_async::grade(&config, session, &accounts, &settings.user)
-                        {
+                        if let Err(e) = command_async::grade(&session, &account.default) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "g" => {
-                        let session = new_session.get_or_insert_with(|| {
+                        if !login_ready {
                             begin!("登录");
                             let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            let session = handle.join().unwrap();
+                            handle.join().unwrap();
                             end!("登录");
-                            session
-                        });
+                            login_ready = true;
+                        }
 
-                        if let Err(e) =
-                            command_async::g(&config, session, &accounts, &settings.user)
-                        {
+                        if let Err(e) = command_async::g(&session, &account.default) {
                             eprintln!("::>_<:: {}", e);
                         };
                     }
                     "config" | "c" => {
-                        match command_async::config(&config, &mut settings, &mut accounts) {
-                            Ok(s) => new_session = s,
-                            Err(e) => {
-                                eprintln!("::>_<:: {}", e)
-                            }
+                        if let Err(e) = command_async::config(&mut settings, &mut account, &session)
+                        {
+                            eprintln!("::>_<:: {}", e);
                         };
                     }
 

@@ -1,38 +1,26 @@
 use crate::utils::{MULTISELECT_PROMPT, SELECT_PROMPT};
 use crate::{
-    account, begin, check_up, completer, end, error, network, success, try_or_throw, utils, warning,
+    account, begin, completer, end, error, network, success, try_or_throw, utils, warning,
 };
 use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, MultiSelect, Select};
-
-use std::collections::HashMap;
 use std::io::Write;
 
 use anyhow::Result;
 use std::thread::{self, JoinHandle};
 
 pub fn fetch_core(
-    config: &utils::Config,
     settings: &utils::Settings,
     session: &network::Session,
     selected_courses: Vec<network::CourseFull>,
 ) -> Result<()> {
-    let activity_upload_record = try_or_throw!(
-        network::Session::load_activity_upload_record(&config.activity_upload_record),
-        "加载已下载课件记录"
-    );
+    let activity_upload_record =
+        try_or_throw!(session.load_activity_upload_record(), "加载已下载课件记录");
 
     try_or_throw!(
-        session.fetch_activity_uploads(
-            &settings.storage_dir,
-            &config.activity_upload_record,
-            selected_courses,
-            activity_upload_record,
-            settings,
-        ),
+        session.fetch_activity_uploads(selected_courses, activity_upload_record, settings,),
         "拉取新课件"
     );
-
     Ok(())
 }
 
@@ -45,16 +33,12 @@ pub fn fetch_core(
 /// 7. 等待上传文件完成
 /// 8. 发送上交作业请求
 /// 9. 等待回复，报告结果
-pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result<()> {
+pub fn submit_core(session: &network::Session) -> Result<()> {
     // 1. 异步实现获取最新作业列表
-    let path_active_courses = config.active_courses.clone();
     let session_cloned = session.clone();
     let get_homework_list_thread: JoinHandle<Result<Vec<network::Homework>>> =
         thread::spawn(move || {
-            let home_work_list = try_or_throw!(
-                session_cloned.get_homework_list(&path_active_courses),
-                "获取作业列表"
-            );
+            let home_work_list = try_or_throw!(session_cloned.get_homework_list(), "获取作业列表");
             Ok(home_work_list)
         });
 
@@ -111,7 +95,7 @@ pub fn submit_core(config: &utils::Config, session: &network::Session) -> Result
     Ok(())
 }
 
-pub fn upgrade_core(config: &utils::Config, session: &network::Session) -> Result<()> {
+pub fn upgrade_core(session: &network::Session) -> Result<()> {
     begin!("获取学期映射表 & 课程列表");
     let semester_map = try_or_throw!(session.get_semester_map(), "获取学期映射表");
     let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
@@ -119,14 +103,14 @@ pub fn upgrade_core(config: &utils::Config, session: &network::Session) -> Resul
 
     let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
     try_or_throw!(
-        network::Session::store_semester_course_map(&config.courses, &semester_course_map),
+        session.store_semester_course_map(&semester_course_map),
         "存储 学期->课程 映射表"
     );
 
     let active_courses = network::Session::filter_active_courses(&semester_course_map);
 
     try_or_throw!(
-        network::Session::store_active_courses(&config.active_courses, &active_courses),
+        session.store_active_courses(&active_courses),
         "存储活跃课程列表"
     );
 
@@ -150,34 +134,23 @@ fn config_help() {
 /// 这样的好处是不用返回线程了，可以直接返回新账号的会话
 /// 而且如果想要使用后续功能，重新刷新课程表的操作是必要的
 pub fn config_core(
-    config: &utils::Config,
     settings: &mut utils::Settings,
-    accounts: &mut HashMap<String, account::Account>,
-) -> Result<Option<network::Session>> {
+    account: &mut account::Account,
+    session: &network::Session,
+) -> Result<()> {
     config_help();
-    let mut new_session_wrapper = None;
+
     let prompt = format!("{} > ", "(config)".blue());
     loop {
         let mut rl = completer::build_generic_editor(completer::CommandType::ConfigCommand);
         match rl.readline(&prompt) {
             Ok(cmd) => match cmd.as_str() {
                 "add-account" | "a" => {
-                    let new_default_account = try_or_throw!(
-                        account::Account::add_account(
-                            &config.accounts,
-                            &config.settings,
-                            accounts,
-                            settings,
-                        ),
-                        "添加用户"
-                    );
-                    new_session_wrapper = Some(check_up::after_change_default_account(
-                        config,
-                        &new_default_account,
-                    ));
+                    try_or_throw!(account.add_account(settings), "添加用户");
+                    session.change_default_account(&account.default);
                 }
                 "remove-account" | "r" => {
-                    let users: Vec<String> = accounts.keys().cloned().collect();
+                    let users: Vec<String> = account.accounts.keys().cloned().collect();
 
                     match Select::with_theme(&ColorfulTheme::default())
                         .with_prompt(SELECT_PROMPT)
@@ -187,17 +160,12 @@ pub fn config_core(
                     {
                         Ok(Some(index)) => {
                             let user_to_delete = &users[index];
-                            if let Some(new_default_account) = account::Account::remove_account(
-                                &config.accounts,
-                                &config.settings,
-                                accounts,
-                                settings,
-                                user_to_delete,
-                            ) {
-                                new_session_wrapper = Some(check_up::after_change_default_account(
-                                    config,
-                                    &new_default_account,
-                                ))
+                            if let Ok(is_default_changed) =
+                                account.remove_account(settings, user_to_delete)
+                            {
+                                if is_default_changed {
+                                    session.change_default_account(&account.default);
+                                }
                             }
                         }
                         _ => {
@@ -207,7 +175,7 @@ pub fn config_core(
                     }
                 }
                 "user-default" | "u" => {
-                    let users: Vec<String> = accounts.keys().cloned().collect();
+                    let users: Vec<String> = account.accounts.keys().cloned().collect();
                     if users.len() == 1 {
                         warning!("只有一个账号 {}", users[0]);
                         continue;
@@ -226,22 +194,11 @@ pub fn config_core(
                                 continue;
                             }
 
-                            try_or_throw!(
-                                utils::Settings::set_default_user(
-                                    settings,
-                                    &config.settings,
-                                    &user_to_set,
-                                ),
-                                "设置默认用户"
-                            );
-                            let new_default_account = try_or_throw!(
-                                account::Account::get_default_account(accounts, &settings.user),
-                                "获取默认账号"
-                            );
-                            new_session_wrapper = Some(check_up::after_change_default_account(
-                                config,
-                                &new_default_account,
-                            ));
+                            try_or_throw!(settings.set_default_user(&user_to_set,), "设置默认用户");
+
+                            account.default = account.accounts.get(user_to_set).unwrap().clone();
+
+                            session.change_default_account(&account.default);
                         }
                         _ => {
                             warning!("取消设置默认账号");
@@ -252,10 +209,7 @@ pub fn config_core(
                 "storage_dir" | "s" => {
                     println!("当前存储目录：{}", settings.storage_dir.display());
                     let storage_dir = completer::readin_storage_dir();
-                    try_or_throw!(
-                        utils::Settings::set_storage_dir(settings, &config.settings, &storage_dir),
-                        "设置存储目录"
-                    );
+                    try_or_throw!(settings.set_storage_dir(&storage_dir), "设置存储目录");
                 }
                 "mp4-trashed" | "m" => {
                     print!("是否跳过下载 mp4 文件？(y/n)");
@@ -267,11 +221,11 @@ pub fn config_core(
                     }
                     match is_pdf.trim() {
                         "y" => try_or_throw!(
-                            utils::Settings::set_mp4_trashed(settings, &config.settings, true),
+                            settings.set_mp4_trashed(true),
                             "设置是否跳过下载 mp4 文件"
                         ),
                         "n" => try_or_throw!(
-                            utils::Settings::set_mp4_trashed(settings, &config.settings, false),
+                            settings.set_mp4_trashed(false),
                             "设置是否跳过下载 mp4 文件"
                         ),
                         _ => warning!("输入无效"),
@@ -286,14 +240,8 @@ pub fn config_core(
                         continue;
                     }
                     match is_pdf.trim() {
-                        "y" => try_or_throw!(
-                            utils::Settings::set_is_pdf(settings, &config.settings, true),
-                            "设置下载 ppt 格式"
-                        ),
-                        "n" => try_or_throw!(
-                            utils::Settings::set_is_pdf(settings, &config.settings, false),
-                            "设置下载 ppt 格式"
-                        ),
+                        "y" => try_or_throw!(settings.set_is_pdf(true), "设置下载 ppt 格式"),
+                        "n" => try_or_throw!(settings.set_is_pdf(false), "设置下载 ppt 格式"),
                         _ => warning!("输入无效"),
                     }
                 }
@@ -321,18 +269,15 @@ pub fn config_core(
             }
         }
     }
-
-    Ok(new_session_wrapper)
+    Ok(())
 }
 
 /// 在 which 前，保证已经有了默认账号、课程列表
 /// 选择课程
 /// 允许啥课程都不选
-pub fn which_core(config: &utils::Config) -> Result<()> {
-    let semester_course_map = try_or_throw!(
-        network::Session::load_semester_course_map(&config.courses),
-        "加载 学期->课程 映射表"
-    );
+pub fn which_core(session: &network::Session) -> Result<()> {
+    let semester_course_map =
+        try_or_throw!(session.load_semester_course_map(), "加载 学期->课程 映射表");
 
     let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
 
@@ -382,18 +327,15 @@ pub fn which_core(config: &utils::Config) -> Result<()> {
         }
     }
     try_or_throw!(
-        network::Session::store_selected_courses(&config.selected_courses, &selected_courses),
+        session.store_selected_courses(&selected_courses),
         "存储已选课程"
     );
     Ok(())
 }
 
-pub fn task_core(config: &utils::Config, session: &network::Session) -> Result<()> {
+pub fn task_core(session: &network::Session) -> Result<()> {
     begin!("获取作业列表");
-    let homework_list = try_or_throw!(
-        session.get_homework_list(&config.active_courses),
-        "获取作业列表"
-    );
+    let homework_list = try_or_throw!(session.get_homework_list(), "获取作业列表");
     end!("获取作业列表");
 
     for homework in homework_list {
@@ -402,20 +344,12 @@ pub fn task_core(config: &utils::Config, session: &network::Session) -> Result<(
     Ok(())
 }
 
-pub fn grade_core(
-    config: &utils::Config,
-    account: &account::Account,
-    session: &network::Session,
-) -> Result<()> {
-    try_or_throw!(session.get_grade(&config.courses, &account), "获取成绩列表");
+pub fn grade_core(account: &account::AccountData, session: &network::Session) -> Result<()> {
+    try_or_throw!(session.get_grade(&account), "获取成绩列表");
     Ok(())
 }
 
-pub fn g_core(
-    config: &utils::Config,
-    account: &account::Account,
-    session: &network::Session,
-) -> Result<()> {
-    try_or_throw!(session.get_g(&config.courses, &account), "获取成绩列表");
+pub fn g_core(account: &account::AccountData, session: &network::Session) -> Result<()> {
+    try_or_throw!(session.get_g(&account), "获取成绩列表");
     Ok(())
 }

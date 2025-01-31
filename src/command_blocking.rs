@@ -3,28 +3,19 @@ use crate::{
     warning,
 };
 
-use std::collections::HashMap;
-
 pub fn fetch(
-    config: &utils::Config,
+    default_account: &account::AccountData,
     settings: &utils::Settings,
-    default_account: &account::Account,
+    session: &network::Session,
 ) {
     process!("FETCH");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
 
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    let selected_courses = try_or_log!(
-        network::Session::load_selected_courses(&config.selected_courses),
-        "加载已选课程"
-    );
+    let selected_courses = try_or_log!(session.load_selected_courses(), "加载已选课程");
 
     // 没有已选课程，就提示用户选课
     if selected_courses.is_empty() {
@@ -37,55 +28,46 @@ pub fn fetch(
     }
 
     try_or_log!(
-        command_share::fetch_core(config, settings, &session, selected_courses),
+        command_share::fetch_core(settings, &session, selected_courses),
         "FETCH"
     );
 
     success!("FETCH");
 }
 
-pub fn submit(config: &utils::Config, default_account: &account::Account) {
+pub fn submit(session: &network::Session, default_account: &account::AccountData) {
     process!("SUBMIT");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
-
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    try_or_log!(command_share::submit_core(config, &session), "SUBMIT");
+    try_or_log!(command_share::submit_core(&session), "SUBMIT");
 
     success!("SUBMIT");
 }
 
-pub fn upgrade(config: &utils::Config, default_account: &account::Account) {
+pub fn upgrade(session: &network::Session, default_account: &account::AccountData) {
     process!("UPGRADE");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    try_or_log!(command_share::upgrade_core(config, &session), "UPGRADE");
+    try_or_log!(command_share::upgrade_core(&session), "UPGRADE");
 
     success!("UPGRADE");
 }
 
 pub fn config(
-    config: &utils::Config,
     settings: &mut utils::Settings,
-    accounts: &mut HashMap<String, account::Account>,
+    account: &mut account::Account,
+    session: &network::Session,
 ) {
     process!("CONFIG");
 
     try_or_log!(
-        command_share::config_core(config, settings, accounts),
+        command_share::config_core(settings, account, session),
         "CONFIG"
     );
 
@@ -94,58 +76,50 @@ pub fn config(
 
 /// 选择课程
 /// 允许啥课程都不选
-pub fn which(config: &utils::Config) {
+pub fn which(session: &network::Session) {
     process!("WHICH");
 
-    try_or_log!(command_share::which_core(config), "WHICH");
+    try_or_log!(command_share::which_core(session), "WHICH");
 
     success!("WHICH");
 }
 
-pub fn task(config: &utils::Config, default_account: &account::Account) {
+pub fn task(session: &network::Session, default_account: &account::AccountData) {
     process!("TASK");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
+
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    try_or_log!(command_share::task_core(config, &session), "TASK");
+    try_or_log!(command_share::task_core(session), "TASK");
 
     success!("TASK");
 }
 
-pub fn grade(config: &utils::Config, default_account: &account::Account) {
+pub fn grade(session: &network::Session, default_account: &account::AccountData) {
     process!("GRADE");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    command_share::grade_core(config, default_account, &session).unwrap();
+    try_or_log!(
+        command_share::grade_core(default_account, session),
+        "GRADE"
+    );
 
     success!("GRADE");
 }
 
-pub fn g(config: &utils::Config, default_account: &account::Account) {
+pub fn g(session: &network::Session, default_account: &account::AccountData) {
     process!("GRADE");
 
     begin!("登录");
-    let session = try_or_log!(
-        network::Session::try_new(config.cookies.clone()),
-        "创建会话"
-    );
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    command_share::g_core(config, default_account, &session).unwrap();
+    try_or_log!(command_share::g_core(default_account, &session), "GRADE");
 
     success!("GRADE");
 }

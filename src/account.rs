@@ -1,4 +1,4 @@
-use crate::{error, success, try_or_exit, try_or_throw, utils, warning};
+use crate::{success, try_or_throw, utils, warning};
 use anyhow::anyhow;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -7,16 +7,48 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct Account {
+pub struct AccountData {
     pub stuid: String,
     pub password: String,
 }
-
-pub type Accounts = HashMap<String, Account>;
+pub type Accounts = HashMap<String, AccountData>;
+pub struct Account {
+    pub accounts: Accounts,
+    pub path_accounts: PathBuf,
+    pub default: AccountData,
+}
 
 impl Account {
-    /// 获取所有的已有账号!
-    pub fn get_accounts(path_accounts: &PathBuf) -> Result<Accounts> {
+    pub fn init(path_accounts: PathBuf, settings: &mut utils::Settings) -> Result<Self> {
+        let mut accounts = Self::load_accounts(&path_accounts)?;
+
+        // 处理没有已知账号的情况
+        let default = if accounts.is_empty() {
+            warning!("未发现已知的账号 => 创建账号");
+            let Ok((new_account, user)) = Self::read_in_account() else {
+                return Err(anyhow!("输入账号"));
+            };
+            accounts.insert(user.clone(), new_account.clone());
+            let json = try_or_throw!(serde_json::to_string(&accounts), "序列化账号");
+            try_or_throw!(fs::write(&path_accounts, json), "写入账号");
+            try_or_throw!(settings.set_default_user(&user), "设置默认用户");
+            new_account
+        } else {
+            let Some(default) = accounts.get(&settings.user) else {
+                return Err(anyhow!("找不到账号 {}", settings.user));
+            };
+            default.clone()
+        };
+
+        Ok(Account {
+            accounts,
+            path_accounts,
+            default,
+        })
+    }
+
+    /// 获取所有的已有账号
+    fn load_accounts(path_accounts: &PathBuf) -> Result<Accounts> {
         let data = try_or_throw!(fs::read_to_string(path_accounts), "读取账号");
         let accounts: Accounts = try_or_throw!(serde_json::from_str(&data), "解析账号");
 
@@ -25,20 +57,8 @@ impl Account {
         Ok(accounts)
     }
 
-    /// 将账号写入配置文件
-    fn write_accounts(path_accounts: &PathBuf, accounts: &Accounts) -> Result<()> {
-        let json = try_or_throw!(serde_json::to_string(&accounts), "序列化账号");
-        try_or_throw!(fs::write(path_accounts, json), "写入账号");
-        Ok(())
-    }
-
-    /// 添加一个账号并修改默认用户！
-    pub fn add_account(
-        path_accounts: &PathBuf,
-        path_settings: &PathBuf,
-        accounts: &mut Accounts,
-        settings: &mut utils::Settings,
-    ) -> Result<Account> {
+    /// 通过输入获得一个 AccountData 和对应用户名 String
+    fn read_in_account() -> Result<(AccountData, String)> {
         let mut stuid = String::new();
         let mut password = String::new();
         let mut user = String::new();
@@ -58,63 +78,46 @@ impl Account {
         try_or_throw!(io::stdin().read_line(&mut password), "读取密码");
         let password = password.trim().to_string();
 
-        let new_account = Account { stuid, password };
-        accounts.insert(user.clone(), new_account.clone());
-
-        try_or_throw!(Account::write_accounts(path_accounts, accounts), "写入账号");
-
-        success!("添加用户 {} -> {}", user, path_accounts.display());
-
-        try_or_throw!(
-            utils::Settings::set_default_user(settings, path_settings, &user),
-            "设置默认用户"
-        );
-        Ok(new_account)
+        Ok((AccountData { stuid, password }, user))
     }
 
-    /// 获取默认账号!
-    pub fn get_default_account(accounts: &Accounts, user: &str) -> Result<Account> {
-        let account = accounts.get(user).ok_or(anyhow!("未找到用户"))?;
+    /// 添加一个账号，并将此用户修改为默认用户
+    pub fn add_account(&mut self, settings: &mut utils::Settings) -> Result<()> {
+        let Ok((new_account, user)) = Self::read_in_account() else {
+            return Err(anyhow!("输入账号"));
+        };
+        self.accounts.insert(user.clone(), new_account);
 
-        success!("当前用户：{}", user);
-        Ok(account.clone())
+        let json = try_or_throw!(serde_json::to_string(&self.accounts), "序列化账号");
+        try_or_throw!(fs::write(&self.path_accounts, json), "写入账号");
+        try_or_throw!(settings.set_default_user(&user), "设置默认用户");
+
+        Ok(())
     }
 
     /// 删除一个账号并(如果需要的话)修改默认用户！
     /// 该函数保证至少有一个默认账号
-    pub fn remove_account(
-        path_accounts: &PathBuf,
-        path_settings: &PathBuf,
-        accounts: &mut Accounts,
-        settings: &mut utils::Settings,
-        user: &str,
-    ) -> Option<Account> {
-        accounts.remove(user);
-        try_or_exit!(Account::write_accounts(path_accounts, accounts), "写入账号");
-
-        success!("删除用户 {} -> {}", user, path_accounts.display());
+    pub fn remove_account(&mut self, settings: &mut utils::Settings, user: &str) -> Result<bool> {
+        self.accounts.remove(user);
+        let json = try_or_throw!(serde_json::to_string(&self.accounts), "序列化账号");
+        try_or_throw!(fs::write(&self.path_accounts, json), "写入账号");
+        success!("删除用户 {} -> {}", user, self.path_accounts.display());
 
         if settings.user != user {
-            return None;
+            return Ok(false);
         }
 
-        match accounts.keys().next() {
+        match self.accounts.keys().next() {
             Some(default_user) => {
-                try_or_exit!(
-                    utils::Settings::set_default_user(settings, path_settings, default_user),
-                    "设置默认用户"
-                );
-                let default_account = accounts.get(default_user).unwrap().clone();
-                Some(default_account)
+                try_or_throw!(settings.set_default_user(default_user), "设置默认用户");
+                self.default = self.accounts.get(default_user).unwrap().clone();
             }
             None => {
                 warning!("没有已知账号 => 添加账号");
-                let default_account = try_or_exit!(
-                    Account::add_account(path_accounts, path_settings, accounts, settings),
-                    "添加账号"
-                );
-                Some(default_account)
+                try_or_throw!(self.add_account(settings), "添加账号");
             }
         }
+
+        Ok(true)
     }
 }

@@ -2,27 +2,51 @@ use crate::{
     account, begin, command_blocking, completer, end, error, network, process, try_or_exit, utils,
     warning,
 };
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[cfg(debug_assertions)]
 use crate::success;
 
 /// 保证配置定位、配置文件(必须有存储目录)正确!
-pub fn config_up() -> (utils::Config, utils::Settings) {
+///
+/// 返回值：
+/// ```txt
+/// (
+///    (
+///         path_accounts,
+///         path_courses,
+///         path_selected_courses,
+///         path_activity_upload_record,
+///         path_cookies,
+///         path_active_courses,
+///     ),
+///     settings,
+/// )
+/// ```
+pub fn config_up() -> (
+    (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf),
+    utils::Settings,
+) {
     #[cfg(debug_assertions)]
     process!("SETUP");
+    let (
+        path_accounts,
+        path_settings,
+        path_courses,
+        path_selected_courses,
+        path_activity_upload_record,
+        path_cookies,
+        path_active_courses,
+    ) = try_or_exit!(utils::Config::init(), "初始化配置文件");
 
-    let config = try_or_exit!(utils::Config::init(), "初始化配置文件");
-
-    let mut settings = try_or_exit!(utils::Settings::load(&config.settings), "读取配置文件");
+    let mut settings = try_or_exit!(utils::Settings::load(path_settings), "读取配置文件");
 
     // 处理没设置存储目录的情况
     if settings.storage_dir == PathBuf::new() {
         let storage_dir = completer::readin_storage_dir();
 
         try_or_exit!(
-            utils::Settings::set_storage_dir(&mut settings, &config.settings, &storage_dir),
+            utils::Settings::set_storage_dir(&mut settings, &storage_dir),
             "设置存储目录"
         );
     }
@@ -30,65 +54,77 @@ pub fn config_up() -> (utils::Config, utils::Settings) {
     #[cfg(debug_assertions)]
     success!("SETUP");
 
-    (config, settings)
+    (
+        (
+            path_accounts,
+            path_courses,
+            path_selected_courses,
+            path_activity_upload_record,
+            path_cookies,
+            path_active_courses,
+        ),
+        settings,
+    )
 }
 
 /// 保证至少有一个默认账号！
-pub fn account_up(
-    config: &utils::Config,
-    settings: &mut utils::Settings,
-) -> (HashMap<String, account::Account>, account::Account) {
+pub fn account_up(path_accounts: PathBuf, settings: &mut utils::Settings) -> account::Account {
     #[cfg(debug_assertions)]
     process!("ACCOUNTUP");
 
-    let mut accounts = try_or_exit!(
-        account::Account::get_accounts(&config.accounts),
-        "获取已知账号"
-    );
-
-    // 处理没有已知账号的情况
-    if accounts.is_empty() {
-        warning!("未发现已知的账号 => 创建账号");
-        try_or_exit!(
-            account::Account::add_account(
-                &config.accounts,
-                &config.settings,
-                &mut accounts,
-                settings,
-            ),
-            "添加用户"
-        );
-    }
-
-    let default_account = try_or_exit!(
-        account::Account::get_default_account(&accounts, &settings.user),
-        "获取默认账号"
+    let account = try_or_exit!(
+        account::Account::init(path_accounts, settings),
+        "初始化账号"
     );
 
     #[cfg(debug_assertions)]
     success!("ACCOUNTUP");
 
-    (accounts, default_account)
+    account
+}
+
+pub fn session_up(
+    path_cookies: PathBuf,
+    path_courses: PathBuf,
+    path_active_courses: PathBuf,
+    path_selected_courses: PathBuf,
+    path_activity_upload_record: PathBuf,
+) -> network::Session {
+    process!("SESSIONUP");
+
+    let session = try_or_exit!(
+        network::Session::try_new(
+            path_cookies,
+            path_courses,
+            path_active_courses,
+            path_selected_courses,
+            path_activity_upload_record
+        ),
+        "建立会话"
+    );
+
+    #[cfg(debug_assertions)]
+    success!("SESSIONUP");
+
+    session
 }
 
 /// 保证已有课程列表！
-pub fn course_up(config: &utils::Config, default_account: &account::Account) {
+pub fn course_up(session: &network::Session, default_account: &account::AccountData) {
     #[cfg(debug_assertions)]
     process!("COURSEUP");
 
-    let semester_course_map = try_or_exit!(
-        network::Session::load_semester_course_map(&config.courses),
-        "加载 学期->课程 映射表"
-    );
+    let semester_course_map =
+        try_or_exit!(session.load_semester_course_map(), "加载 学期->课程 映射表");
 
     // 处理课程列表为空的情况
     if semester_course_map.is_empty() {
         warning!("无 学期->课程 映射表 => 获取学期课程列表 & 活跃课程列表");
         begin!("获取学期课程列表 & 活跃课程列表");
-        let session = try_or_exit!(
-            network::Session::try_new(config.cookies.clone()),
-            "建立会话"
-        );
+        // let session = try_or_exit!(
+        //     network::Session::try_new(config.cookies.clone()),
+        //     "建立会话"
+        // );
 
         try_or_exit!(session.login(default_account), "登录");
 
@@ -96,17 +132,18 @@ pub fn course_up(config: &utils::Config, default_account: &account::Account) {
 
         let course_list = try_or_exit!(session.get_course_list(), "获取课程列表");
 
-        let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
+        let semester_course_map =
+            network::Session::to_semester_course_map(course_list, semester_map);
 
         let active_courses = network::Session::filter_active_courses(&semester_course_map);
 
         try_or_exit!(
-            network::Session::store_semester_course_map(&config.courses, &semester_course_map),
+            session.store_semester_course_map(&semester_course_map),
             "存储 学期->课程 映射表"
         );
 
         try_or_exit!(
-            network::Session::store_active_courses(&config.active_courses, &active_courses),
+            session.store_active_courses(&active_courses),
             "存储活跃课程列表"
         );
         end!("获取学期课程列表 & 活跃课程列表");
@@ -120,54 +157,61 @@ pub fn course_up(config: &utils::Config, default_account: &account::Account) {
 /// 1. 配置文件正确
 /// 2. 至少有一个默认账号
 /// 3. 有课程列表和活跃课程列表
-pub fn all_up() -> (
-    utils::Config,
-    utils::Settings,
-    HashMap<String, account::Account>,
-    account::Account,
-) {
-    let (config, mut settings) = config_up();
-    let (accounts, default_account) = account_up(&config, &mut settings);
-    course_up(&config, &default_account);
-    (config, settings, accounts, default_account)
+pub fn all_up() -> (utils::Settings, account::Account, network::Session) {
+    let (
+        (
+            path_accounts,
+            path_courses,
+            path_selected_courses,
+            path_activity_upload_record,
+            path_cookies,
+            path_active_courses,
+        ),
+        mut settings,
+    ) = config_up();
+    let account = account_up(path_accounts, &mut settings);
+    let session = session_up(
+        path_cookies,
+        path_courses,
+        path_active_courses,
+        path_selected_courses,
+        path_activity_upload_record,
+    );
+    course_up(&session, &account.default);
+    (settings, account, session)
 }
 
-/// 切换默认账号后，重新登陆并刷新 学期->课程 映射表
-pub fn after_change_default_account(
-    config: &utils::Config,
-    default_account: &account::Account,
-) -> network::Session {
-    process!("更换用户 => 更新 学期->课程 映射表与已选课程");
+impl network::Session {
+    /// 切换默认账号后，重新登陆并刷新 学期->课程 映射表
+    pub fn change_default_account(&self, default_account: &account::AccountData) {
+        process!("更换用户 => 更新 学期->课程 映射表与已选课程");
 
-    begin!("重新登录");
-    let new_session = try_or_exit!(
-        network::Session::try_new(config.cookies.clone()),
-        "建立会话"
-    );
-    try_or_exit!(new_session.relogin(default_account), "重新登录");
-    end!("重新登录");
+        begin!("重新登录");
+        try_or_exit!(self.relogin(default_account), "重新登录");
+        end!("重新登录");
 
-    begin!("获取学期课程列表 & 活跃课程列表");
-    let semester_map = try_or_exit!(new_session.get_semester_map(), "获取学期映射表");
+        begin!("获取学期课程列表 & 活跃课程列表");
+        let semester_map = try_or_exit!(self.get_semester_map(), "获取学期映射表");
 
-    let course_list = try_or_exit!(new_session.get_course_list(), "获取课程列表");
+        let course_list = try_or_exit!(self.get_course_list(), "获取课程列表");
 
-    let semester_course_map = network::Session::to_semester_course_map(course_list, semester_map);
+        let semester_course_map =
+            network::Session::to_semester_course_map(course_list, semester_map);
 
-    let active_courses = network::Session::filter_active_courses(&semester_course_map);
+        let active_courses = network::Session::filter_active_courses(&semester_course_map);
 
-    try_or_exit!(
-        network::Session::store_semester_course_map(&config.courses, &semester_course_map),
-        "存储 学期->课程 映射表"
-    );
+        try_or_exit!(
+            self.store_semester_course_map(&semester_course_map),
+            "存储 学期->课程 映射表"
+        );
 
-    try_or_exit!(
-        network::Session::store_active_courses(&config.active_courses, &active_courses),
-        "存储活跃课程列表"
-    );
+        try_or_exit!(
+            self.store_active_courses(&active_courses),
+            "存储活跃课程列表"
+        );
 
-    end!("获取学期课程列表 & 活跃课程列表");
+        end!("获取学期课程列表 & 活跃课程列表");
 
-    command_blocking::which(config);
-    new_session
+        command_blocking::which(self);
+    }
 }
