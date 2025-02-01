@@ -2,8 +2,7 @@
 #[macro_export]
 macro_rules! success {
     ($($arg:tt)*) => ({
-        use colored::*;
-        println!("{}  {}","✓".green() ,format!($($arg)*));
+        println!("\x1b[32m✓\x1b[0m  {}" ,format!($($arg)*));
     })
 }
 
@@ -11,8 +10,7 @@ macro_rules! success {
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => ({
-        use colored::*;
-        eprintln!("{}  {}","✗".red() ,format!($($arg)*));
+        eprintln!("\x1b[31m✗\x1b[0m  {}",format!($($arg)*));
     })
 }
 
@@ -20,8 +18,7 @@ macro_rules! error {
 #[macro_export]
 macro_rules! warning {
     ($($arg:tt)*) => ({
-        use colored::*;
-        println!("{}  {}","!".yellow() ,format!($($arg)*));
+        println!("\x1b[33m!\x1b[0m  {}" ,format!($($arg)*));
     })
 }
 
@@ -29,8 +26,7 @@ macro_rules! warning {
 #[macro_export]
 macro_rules! process {
     ($($arg:tt)*) => ({
-        use colored::*;
-        println!("{}  {}","⚙".blue() ,format!($($arg)*));
+        println!("\x1b[34m⚙\x1b[0m  {}" ,format!($($arg)*));
     })
 }
 
@@ -54,12 +50,11 @@ macro_rules! begin {
 #[macro_export]
 macro_rules! end {
     ($($arg:tt)*) => ({
-        use colored::*;
         use std::io::Write;
         #[cfg(not(debug_assertions))]
-        print!("\r{}  {}\n","✓".green() ,format!($($arg)*));
+        print!("\r\x1b[32m✓\x1b[0m  {}\n",format!($($arg)*));
         #[cfg(debug_assertions)]
-        print!("{}  {}\n","✓".green() ,format!($($arg)*));
+        print!("\x1b[32m✓\x1b[0m  {}\n",format!($($arg)*));
         std::io::stdout().flush().unwrap();
     })
 }

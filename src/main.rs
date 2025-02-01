@@ -115,7 +115,7 @@ fn single_iterative_term(
                 update::update()?;
             }
             "v"| "version" => {
-                println!("当前版本：{}", env!("CARGO_PKG_VERSION"));
+                success!("Version {}", env!("CARGO_PKG_VERSION"));
             }
             _ => {
                 warning!("无效命令，请重新输入");

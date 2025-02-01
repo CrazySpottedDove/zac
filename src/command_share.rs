@@ -2,7 +2,6 @@ use crate::utils::{MULTISELECT_PROMPT, SELECT_PROMPT};
 use crate::{
     account, begin, completer, end, error, network, success, try_or_throw, utils, warning,
 };
-use colored::Colorize;
 use dialoguer::{theme::ColorfulTheme, MultiSelect, Select};
 use std::io::Write;
 

@@ -5,8 +5,6 @@ use crate::{
 use ::serde::{Deserialize, Serialize};
 use anyhow::anyhow;
 use anyhow::Result;
-use colored::ColoredString;
-use colored::Colorize;
 use cookie_store::CookieStore;
 use num::ToPrimitive;
 use rayon::prelude::*;
@@ -580,7 +578,7 @@ impl Session {
                 .filter_map(|(semester, course_name, upload_id, file_name)| {
                     let pb = multi_pb.add(ProgressBar::new(0));
                     pb.set_style(pb_style.clone());
-                    pb.set_message(format!("{} {}", "⚙".blue(), file_name));
+                    pb.set_message(format!("\x1b[34m⚙\x1b[0m {}", file_name));
                     match self.download_upload(
                         &settings.storage_dir.join(semester).join(course_name),
                         *upload_id,
@@ -692,11 +690,9 @@ impl Session {
             pb.inc(bytes as u64);
         }
 
-        pb.finish_with_message(format!("{} {}", "✓".green(), file_name));
+        pb.finish_with_message(format!("\x1b[32m✓\x1b[0m {}", file_name));
         Ok(())
     }
-
-
 
     /// 上传文件到个人资料库
     pub fn upload_file(&self, file_path: &PathBuf) -> Result<u64> {
@@ -873,11 +869,10 @@ impl Session {
                                                 let id = hw["id"].as_u64().unwrap();
                                                 let ddl = format_ddl(hw["deadline"].as_str().unwrap());
                                                 let status = hw["submitted"].as_bool().unwrap();
-                                                use colored::Colorize;
-                                                let (status_signal,ddl) = if status {
-                                                    ("✓".green(), ddl.green())
+                                                let (status_signal, ddl) = if status {
+                                                    ("\x1b[32m✓\x1b[0m", format!("\x1b[32m{}\x1b[0m", ddl))
                                                 } else {
-                                                    ("!".yellow(), ddl.yellow())
+                                                    ("\x1b[33m!\x1b[0m", format!("\x1b[33m{}\x1b[0m", ddl))
                                                 };
                                                 let name = format!(
                                                     "{} {}::{}\n\t{}\n\t{}",
@@ -1365,21 +1360,21 @@ fn create_table(data: &[Grade]) -> String {
     table
 }
 
-fn format_gpa_str(gpa: f64) -> ColoredString {
+fn format_gpa_str(gpa: f64) -> String {
     let formatted_gpa = format!("{:.1}", gpa);
     match gpa {
-        4.5..=5.0 => formatted_gpa.green(),
-        3.5..4.5 => formatted_gpa.cyan(),
-        2.4..3.5 => formatted_gpa.yellow(),
-        0.0..2.4 => formatted_gpa.red(),
-        _ => formatted_gpa.white(),
+        4.5..=5.0 => format!("\x1b[32m{}\x1b[0m", formatted_gpa), // 绿色
+        3.5..4.5 => format!("\x1b[36m{}\x1b[0m", formatted_gpa),  // 青色
+        2.4..3.5 => format!("\x1b[33m{}\x1b[0m", formatted_gpa),  // 黄色
+        0.0..2.4 => format!("\x1b[31m{}\x1b[0m", formatted_gpa),  // 红色
+        _ => formatted_gpa,                                       // 白色
     }
 }
 
-fn format_class_name(name: &str, credit_num: f64) -> ColoredString {
+fn format_class_name(name: &str, credit_num: f64) -> String {
     match credit_num {
-        4.0..=5.0 => name.purple(),
-        2.0..=3.0 => name.blue(),
-        _ => name.white(),
+        4.0..=5.0 => format!("\x1b[35m{}\x1b[0m", name), // 紫色
+        2.0..=3.0 => format!("\x1b[34m{}\x1b[0m", name), // 蓝色
+        _ => name.to_string(),                           // 白色
     }
 }
