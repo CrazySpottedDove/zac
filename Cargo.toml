@@ -22,4 +22,8 @@ html2text="0.13.6"
 self_update = "0.42.0"
 
 [profile.release]
+opt-level = "z"
 panic = "abort"
+codegen-units = 1
+lto = true
+strip = "symbols"
