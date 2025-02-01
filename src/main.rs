@@ -11,7 +11,7 @@ use zac::completer;
 use zac::completer::GenericHelper;
 use zac::update;
 use zac::{account, network, utils};
-use zac::{begin, end, error, process, success, warning};
+use zac::{begin, end, error, process, success, warning,try_or_log};
 const CMD_NAME: &str = "zac";
 
 const CMD_ABOUT: &str = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac";
@@ -58,8 +58,12 @@ struct Cli {
     update: bool,
 }
 
-fn guarantee_login(login_ready: &mut bool, pre_login_thread_wrapper: &mut Option<JoinHandle<()>>) {
+fn guarantee_login_and_check_new_version(login_ready: &mut bool, pre_login_thread_wrapper: &mut Option<JoinHandle<()>>, check_new_version_thread:&mut Option<JoinHandle<bool>>){
     if !*login_ready {
+        let have_new_version = check_new_version_thread.take().expect("线程句柄不可用");
+        if have_new_version.join().unwrap(){
+            println!("\x1b[90m检查到可用的新版本，可使用 update 更新~\x1b[0m")
+        }
         begin!("登录");
         let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
         handle.join().unwrap();
@@ -75,34 +79,35 @@ fn single_iterative_term(
     settings: &mut utils::Settings,
     login_ready: &mut bool,
     pre_login_thread_wrapper: &mut Option<JoinHandle<()>>,
+    check_new_version_thread_wrapper:&mut Option<JoinHandle<bool>>
 ) -> Result<bool> {
     match rl.readline(&format!("{} > ", CMD_NAME)) {
         Ok(input) => match input.as_str() {
             "fetch" | "f" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::fetch(settings, session)?;
             }
             "submit" | "s" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::submit(session)?;
             }
             "upgrade" | "u" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::upgrade(session)?;
             }
             "which" | "w" => {
                 command_async::which(session)?;
             }
             "task" | "t" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::task(session)?;
             }
             "grade" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::grade(session, &account.default)?;
             }
             "g" => {
-                guarantee_login(login_ready, pre_login_thread_wrapper);
+                guarantee_login_and_check_new_version(login_ready, pre_login_thread_wrapper,check_new_version_thread_wrapper);
                 command_async::g(session, &account.default)?;
             }
             "config" | "c" => {
@@ -115,7 +120,7 @@ fn single_iterative_term(
                 update::update()?;
             }
             "v"| "version" => {
-                success!("Version {}", env!("CARGO_PKG_VERSION"));
+                success!("v{}", env!("CARGO_PKG_VERSION"));
             }
             _ => {
                 warning!("无效命令，请重新输入");
@@ -153,12 +158,13 @@ fn main() {
     } else if cli.g {
         command_blocking::g(&session, &account.default);
     } else if cli.update {
-        update::update().unwrap();
+        try_or_log!(update::update(),"更新");
     } else {
         let mut pre_login_thread_wrapper = Some(command_async::pre_login(
             account.default.clone(),
             session.clone(),
         ));
+        let mut new_version_check_thread_wrapper = Some(update::check_update());
         let mut login_ready = false;
         Cli::command().print_help().unwrap();
         process!("交互模式 Ctrl+C 退出");
@@ -171,6 +177,7 @@ fn main() {
                 &mut settings,
                 &mut login_ready,
                 &mut pre_login_thread_wrapper,
+                &mut new_version_check_thread_wrapper
             ) {
                 Ok(true) => {
                     success!("退出 zac");

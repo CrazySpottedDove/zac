@@ -1018,15 +1018,19 @@ impl Session {
             .iter()
             .filter_map(|grade_json| {
                 let obj = grade_json.as_object()?;
+                let grade = obj["cj"].as_str()?;
+                if grade == "弃修" {
+                    return None;
+                }
                 let name = obj["kcmc"].as_str()?;
                 let xq = obj["xq"].as_str()?;
                 let xn = obj["xn"].as_str()?;
                 let credit = obj["xf"].as_str()?;
                 let gpa = obj["jd"].as_f64()?;
-                let grade = obj["cj"].as_str()?;
                 let gpa_str = format_gpa_str(gpa);
                 let credit_num: f64 = credit.parse().unwrap();
                 let name_str = format_class_name(name, credit_num);
+
                 weight_sum += gpa * credit_num;
                 credit_sum += credit_num;
                 if xn_set.contains(xn) {
@@ -1037,12 +1041,12 @@ impl Session {
                         credit_sum_semester += credit_num;
                     }
                 }
-                return Some(Grade {
+                Some(Grade {
                     name: name_str.to_string(),
                     grade: grade.to_string(),
                     credit: credit.to_string(),
                     gpa: gpa_str.to_string(),
-                });
+                })
             })
             .collect();
 
@@ -1094,6 +1098,10 @@ impl Session {
             .iter()
             .filter_map(|grade_json| {
                 let obj = grade_json.as_object()?;
+                let grade = obj["cj"].as_str()?;
+                if grade == "弃修" {
+                    return None;
+                }
                 let xq = obj["xq"].as_str()?;
                 let xn = obj["xn"].as_str()?;
                 let gpa = obj["jd"].as_f64()?;
@@ -1106,7 +1114,6 @@ impl Session {
                     credit_sum_year += credit_num;
                     if xq_set.contains(xq) {
                         let name = obj["kcmc"].as_str()?;
-                        let grade = obj["cj"].as_str()?;
                         let gpa_str = format_gpa_str(gpa);
                         let name_str = format_class_name(name, credit_num);
                         weight_sum_semester += gpa * credit_num;
