@@ -25,8 +25,9 @@ Options:
   -w, --which    选择需要拉取的课程
   -t, --task     查看作业
       --grade    查看所有成绩
-      --g        查看本学期成绩
+  -g             查看本学期成绩
   -c, --config   配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
+      --update   执行更新
   -h, --help     Print help
   -V, --version  Print version
 ```
@@ -37,7 +38,7 @@ Options:
 
 ## Advanced Suggestions
 
-作为命令行工具，推荐的是在终端中使用。本应用的主要耗时为登录雪灾浙大，而这一耗时可以通过保持应用开启避免。当这一耗时被避免，本应用可以保证所有相关操作速度快于雪灾浙大。而在资源占用上，应用待机消耗仅为 2MB，远低于浏览器消耗，相比终端本身的消耗也可以忽略不计。因此，在终端上开一个分网格给 zac 是很好的方案。
+作为命令行工具，推荐的是在终端中使用。本应用的主要耗时为登录雪灾浙大，而这一耗时可以通过保持应用开启避免。当这一耗时被避免，本应用可以保证所有相关操作速度快于雪灾浙大。而在资源占用上，应用待机消耗仅为 3MB，远低于浏览器消耗，相比终端本身的消耗也几乎可以忽略不计。因此，在终端上开一个分网格给 zac 是很好的方案。
 
 另外，添加到环境变量，无需多言。
 
@@ -56,16 +57,26 @@ zac 工具所有网络请求仅指向雪灾浙大和 Github，其中有关 Githu
 ## Glimpse of Running
 
 * 获取作业列表，选择要拉取的文件
+
 ![alt text](./figures/task-which.png)
 
 * 拉取课件
+
 ![alt text](./figures/fetch.png)
+
 * 上传作业
+
 ![alt text](./figures/submit.png)
+
+* 查看成绩
+
+![alt text](./figures/grade.png)
 
 ## How to Download?
 
-Release中提供了构建好的、不同平台的 windows 版本、macos 版本和 linux 版本。
+Release 中（Github 页面右侧）提供了构建好的、不同平台的 windows 版本、macos 版本和 linux 版本。
+
+务必选择最新版本，它很有可能在提供新功能的同时修复旧功能的 bug，具体可见 commit 历史。
 
 ## How to Build?
 
@@ -93,6 +104,16 @@ cargo build --release --target x86_64-pc-windows-gnu
 ```
 
 如果直接在 Github 克隆本项目，则可以直接使用本项目的 workflows 文件获取不同平台构建结果。
+
+## How to Update?
+
+在 v0.1.1 版本后，zac 开始支持自更新功能，只需运行
+
+```bash
+zac --update
+```
+
+即可完成更新。
 
 ## Known Issues
 

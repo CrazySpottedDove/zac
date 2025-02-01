@@ -298,6 +298,7 @@ impl Session {
             })
             .collect();
 
+        #[cfg(debug_assertions)]
         success!("获取学期映射表");
         semester_map
     }
@@ -319,6 +320,7 @@ impl Session {
             })
             .collect();
 
+        #[cfg(debug_assertions)]
         success!("获取课程列表");
         Ok(course_list)
     }
