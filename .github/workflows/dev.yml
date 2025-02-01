@@ -22,19 +22,15 @@ jobs:
         rustup target add x86_64-apple-darwin
     - name: Build macOS binaries
       run: |
-        cargo build --features pb --target aarch64-apple-darwin --bin zacpb
-        cargo build --target aarch64-apple-darwin --bin zac
-        cargo build --features pb --target x86_64-apple-darwin --bin zacpb
-        cargo build --target x86_64-apple-darwin --bin zac
+        cargo build --target aarch64-apple-darwin
+        cargo build --target x86_64-apple-darwin
     - name: Upload macOS binaries
       uses: actions/upload-artifact@v4
       with:
         name: macos-binaries
         path: |
-          target/aarch64-apple-darwin/release/zacpb
-          target/aarch64-apple-darwin/release/zac
-          target/x86_64-apple-darwin/release/zacpb
-          target/x86_64-apple-darwin/release/zac
+          target/aarch64-apple-darwin/debug/zac
+          target/x86_64-apple-darwin/debug/zac
 
   build-windows:
     name: Build for Windows
@@ -46,14 +42,12 @@ jobs:
       run: rustup target add x86_64-pc-windows-msvc
     - name: Build Windows binaries
       run: |
-        cargo build --features pb --target x86_64-pc-windows-msvc --bin zacpb
-        cargo build --target x86_64-pc-windows-msvc --bin zac
+        cargo build --target x86_64-pc-windows-msvc
     - name: Upload Windows binaries
       uses: actions/upload-artifact@v4
       with:
         name: windows-binaries
         path: |
-          target/x86_64-pc-windows-msvc/debug/zacpb.exe
           target/x86_64-pc-windows-msvc/debug/zac.exe
 
   build-linux:
@@ -66,12 +60,10 @@ jobs:
       run: rustup target add x86_64-unknown-linux-gnu
     - name: Build Linux binaries
       run: |
-        cargo build --features pb --target x86_64-unknown-linux-gnu --bin zacpb
-        cargo build --target x86_64-unknown-linux-gnu --bin zac
+        cargo build --target x86_64-unknown-linux-gnu
     - name: Upload Linux binaries
       uses: actions/upload-artifact@v4
       with:
         name: linux-binaries
         path: |
-          target/x86_64-unknown-linux-gnu/debug/zacpb
           target/x86_64-unknown-linux-gnu/debug/zac

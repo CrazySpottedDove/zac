@@ -1,6 +1,6 @@
 [package]
 name = "zac"
-version = "0.1.0"
+version = "0.0.9"
 edition = "2021"
 
 [dependencies]
@@ -16,21 +16,11 @@ anyhow="1.0.95"
 regex ={ version = "1.11.1"}
 num="0.4.3"
 rayon="1.5.1"
-indicatif={version = "0.17.0", optional = true}
+indicatif={version = "0.17.0"}
 rustyline="15.0.0"
 chrono="0.4"
 html2text="0.13.6"
-
-[features]
-pb = ["indicatif"]
-
-[[bin]]
-name = "zac"
-path = "src/main.rs"
-
-[[bin]]
-name = "zacpb"
-path = "src/main.rs"
+self_update = "0.42.0"
 
 [profile.release]
 panic = "abort"

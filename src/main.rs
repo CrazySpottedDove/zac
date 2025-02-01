@@ -1,21 +1,19 @@
+use std::thread::JoinHandle;
+
+use anyhow::Result;
 use clap::{ArgGroup, CommandFactory, Parser};
-use colored::Colorize;
+use rustyline::history::FileHistory;
+use rustyline::Editor;
 use zac::check_up;
 use zac::command_async;
 use zac::command_blocking;
 use zac::completer;
+use zac::completer::GenericHelper;
+use zac::update;
+use zac::{account, network, utils};
 use zac::{begin, end, error, process, success, warning};
-
-#[cfg(feature = "pb")]
-const CMD_NAME: &str = "zacpb";
-
-#[cfg(not(feature = "pb"))]
 const CMD_NAME: &str = "zac";
 
-#[cfg(feature = "pb")]
-const CMD_ABOUT: &str = "zacpb(zju-assistant-cli::progress-bar) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac";
-
-#[cfg(not(feature = "pb"))]
 const CMD_ABOUT: &str = "zac(zju-assistant-cli) 是一个用于获取或上传雪灾浙大资源的命令行工具。若想了解更多，见 https://github.com/CrazySpottedDove/zac";
 
 #[derive(Parser)]
@@ -50,11 +48,88 @@ struct Cli {
     #[arg(long)]
     grade: bool,
     /// 查看本学期成绩
-    #[arg(long)]
+    #[arg(short)]
     g: bool,
     /// 配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
     #[arg(short, long)]
     config: bool,
+    /// 执行更新
+    #[arg(long)]
+    update: bool,
+}
+
+fn guarantee_login(login_ready: &mut bool, pre_login_thread_wrapper: &mut Option<JoinHandle<()>>) {
+    if !*login_ready {
+        begin!("登录");
+        let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
+        handle.join().unwrap();
+        end!("登录");
+        *login_ready = true;
+    }
+}
+
+fn single_iterative_term(
+    rl: &mut Editor<GenericHelper, FileHistory>,
+    session: &network::Session,
+    account: &mut account::Account,
+    settings: &mut utils::Settings,
+    login_ready: &mut bool,
+    pre_login_thread_wrapper: &mut Option<JoinHandle<()>>,
+) -> Result<bool> {
+    match rl.readline(&format!("{} > ", CMD_NAME)) {
+        Ok(input) => match input.as_str() {
+            "fetch" | "f" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::fetch(settings, session)?;
+            }
+            "submit" | "s" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::submit(session)?;
+            }
+            "upgrade" | "u" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::upgrade(session)?;
+            }
+            "which" | "w" => {
+                command_async::which(session)?;
+            }
+            "task" | "t" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::task(session)?;
+            }
+            "grade" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::grade(session, &account.default)?;
+            }
+            "g" => {
+                guarantee_login(login_ready, pre_login_thread_wrapper);
+                command_async::g(session, &account.default)?;
+            }
+            "config" | "c" => {
+                command_async::config(settings, account, session)?;
+            }
+            "help" | "h" => {
+                Cli::command().print_help()?;
+            }
+            "update" => {
+                update::update()?;
+            }
+            "v"| "version" => {
+                println!("当前版本：{}", env!("CARGO_PKG_VERSION"));
+            }
+            _ => {
+                warning!("无效命令，请重新输入");
+            }
+        },
+        Err(rustyline::error::ReadlineError::Interrupted)
+        | Err(rustyline::error::ReadlineError::Eof) => {
+            return Ok(true);
+        }
+        Err(e) => {
+            error!("输入错误：{}", e);
+        }
+    }
+    Ok(false)
 }
 
 fn main() {
@@ -77,6 +152,8 @@ fn main() {
         command_blocking::grade(&session, &account.default);
     } else if cli.g {
         command_blocking::g(&session, &account.default);
+    } else if cli.update {
+        update::update().unwrap();
     } else {
         let mut pre_login_thread_wrapper = Some(command_async::pre_login(
             account.default.clone(),
@@ -87,113 +164,22 @@ fn main() {
         process!("交互模式 Ctrl+C 退出");
         let mut rl = completer::build_generic_editor(completer::CommandType::MainCommand);
         loop {
-            match rl.readline(&format!("{} > ", CMD_NAME.blue())) {
-                Ok(input) => match input.as_str() {
-                    "fetch" | "f" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-
-                        if let Err(e) = command_async::fetch(&settings, &session) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "submit" | "s" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-                        if let Err(e) = command_async::submit(&session) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "upgrade" | "u" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-                        if let Err(e) = command_async::upgrade(&session) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "which" | "w" => {
-                        if let Err(e) = command_async::which(&session) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "task" | "t" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-                        if let Err(e) = command_async::task(&session) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "grade" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-
-                        if let Err(e) = command_async::grade(&session, &account.default) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "g" => {
-                        if !login_ready {
-                            begin!("登录");
-                            let handle = pre_login_thread_wrapper.take().expect("线程句柄不可用");
-                            handle.join().unwrap();
-                            end!("登录");
-                            login_ready = true;
-                        }
-
-                        if let Err(e) = command_async::g(&session, &account.default) {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-                    "config" | "c" => {
-                        if let Err(e) = command_async::config(&mut settings, &mut account, &session)
-                        {
-                            eprintln!("::>_<:: {}", e);
-                        };
-                    }
-
-                    "help" | "h" => {
-                        Cli::command().print_help().unwrap();
-                    }
-                    _ => {
-                        warning!("无效命令，请重新输入");
-                    }
-                },
-                Err(rustyline::error::ReadlineError::Interrupted)
-                | Err(rustyline::error::ReadlineError::Eof) => {
-                    #[cfg(feature = "pb")]
-                    success!("退出 zacpb");
-                    #[cfg(not(feature = "pb"))]
+            match single_iterative_term(
+                &mut rl,
+                &session,
+                &mut account,
+                &mut settings,
+                &mut login_ready,
+                &mut pre_login_thread_wrapper,
+            ) {
+                Ok(true) => {
                     success!("退出 zac");
-                    return;
+                    break;
                 }
                 Err(e) => {
-                    error!("输入错误：{}", e);
+                    error!("{}", e);
                 }
+                _ => {}
             }
         }
     }

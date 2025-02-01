@@ -14,8 +14,8 @@ use std::error::Error;
 use std::path::PathBuf;
 
 const MAIN_COMMANDS: &[&str] = &[
-    "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "h", "f", "s", "u",
-    "c", "w", "g", "t",
+    "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "version", "h", "f",
+    "s", "u", "c", "w", "g", "t", "v", "update",
 ];
 const CONFIG_MAIN_COMMANDS: &[&str] = &[
     "help",
@@ -231,7 +231,9 @@ pub fn readin_path() -> PathBuf {
     }
 }
 
-pub fn build_generic_editor(commands:CommandType) -> rustyline::Editor<GenericHelper, FileHistory> {
+pub fn build_generic_editor(
+    commands: CommandType,
+) -> rustyline::Editor<GenericHelper, FileHistory> {
     let config = rustyline::Config::builder()
         .completion_type(rustyline::CompletionType::List)
         .check_cursor_position(false)
@@ -243,7 +245,7 @@ pub fn build_generic_editor(commands:CommandType) -> rustyline::Editor<GenericHe
     rl
 }
 
-pub enum CommandType{
+pub enum CommandType {
     MainCommand,
     ConfigCommand,
 }
@@ -270,8 +272,7 @@ impl Completer for GenericCompleter {
             CommandType::MainCommand => MAIN_COMMANDS,
             CommandType::ConfigCommand => CONFIG_MAIN_COMMANDS,
         };
-        let candidates: Vec<String> =
-            commands
+        let candidates: Vec<String> = commands
             .iter()
             .filter_map(|cmd| {
                 if cmd.starts_with(line) {
@@ -296,9 +297,9 @@ impl Highlighter for GenericHelper {
         Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint)) // 90 是灰色
     }
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        let commands = match self.completer.commands{
-            CommandType::MainCommand=>MAIN_COMMANDS,
-            CommandType::ConfigCommand=>CONFIG_MAIN_COMMANDS,
+        let commands = match self.completer.commands {
+            CommandType::MainCommand => MAIN_COMMANDS,
+            CommandType::ConfigCommand => CONFIG_MAIN_COMMANDS,
         };
         // 检查输入是否完全匹配任何命令
         if commands.contains(&line) {
@@ -308,13 +309,21 @@ impl Highlighter for GenericHelper {
             Cow::Borrowed(line)
         }
     }
+
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'b str,
+        _default: bool,
+    ) -> Cow<'b, str> {
+        Cow::Owned(format!("\x1b[1;34m{}\x1b[0m", prompt)) // 加粗并设置为蓝色
+    }
 }
 impl Hinter for GenericHelper {
     type Hint = String;
 
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
         // 提取第一个候选项的剩余部分作为“Hint”
-        if let Ok((start, candidates)) = self.completer.complete(line, pos, ctx){
+        if let Ok((start, candidates)) = self.completer.complete(line, pos, ctx) {
             if !candidates.is_empty() {
                 let first = &candidates[0];
                 let hint = &first[pos - start..];

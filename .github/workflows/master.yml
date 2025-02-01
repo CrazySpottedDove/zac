@@ -32,18 +32,14 @@ jobs:
           rustup target add x86_64-apple-darwin
       - name: Build macOS binaries
         run: |
-          cargo build --release --features pb --target aarch64-apple-darwin --bin zacpb
-          cargo build --release --target aarch64-apple-darwin --bin zac
-          cargo build --release --features pb --target x86_64-apple-darwin --bin zacpb
-          cargo build --release --target x86_64-apple-darwin --bin zac
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
       - name: Upload macOS binaries
         uses: actions/upload-artifact@v4
         with:
           name: macos-binaries
           path: |
-            target/aarch64-apple-darwin/release/zacpb
             target/aarch64-apple-darwin/release/zac
-            target/x86_64-apple-darwin/release/zacpb
             target/x86_64-apple-darwin/release/zac
 
   build-windows:
@@ -55,14 +51,12 @@ jobs:
         run: rustup target add x86_64-pc-windows-msvc
       - name: Build Windows binaries
         run: |
-          cargo build --release --features pb --target x86_64-pc-windows-msvc --bin zacpb
-          cargo build --release --target x86_64-pc-windows-msvc --bin zac
+          cargo build --release --target x86_64-pc-windows-msvc
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
           path: |
-            target/x86_64-pc-windows-msvc/release/zacpb.exe
             target/x86_64-pc-windows-msvc/release/zac.exe
 
   build-linux:
@@ -74,14 +68,12 @@ jobs:
         run: rustup target add x86_64-unknown-linux-gnu
       - name: Build Linux binaries
         run: |
-          cargo build --release --features pb --target x86_64-unknown-linux-gnu --bin zacpb
-          cargo build --release --target x86_64-unknown-linux-gnu --bin zac
+          cargo build --release --target x86_64-unknown-linux-gnu
       - name: Upload Linux binaries
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
           path: |
-            target/x86_64-unknown-linux-gnu/release/zacpb
             target/x86_64-unknown-linux-gnu/release/zac
 
   release:
@@ -124,7 +116,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           release_name: ${{ github.ref_name }}
-          body: "请根据自己的平台下载对应的二进制文件，其中带 pb 的为进度条特性构建版本。下载后，可自行修改文件名称为 zac 或 zacpb。"
+          body: "请根据自己的平台下载对应的二进制文件。下载后，请自行修改文件名称为 zac。"
           draft: false
           prerelease: false
         env:
@@ -135,17 +127,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: macos/aarch64-apple-darwin/release/zac
-          asset_name: zac_macos_arm64
-          asset_content_type: application/octet-stream
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload macOS (arm64) zacpb
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: macos/aarch64-apple-darwin/release/zacpb
-          asset_name: zacpb_macos_arm64
+          asset_name: zac-${{ github.ref_name }}-macos-arm64
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,17 +137,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: macos/x86_64-apple-darwin/release/zac
-          asset_name: zac_macos_x86_64
-          asset_content_type: application/octet-stream
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload macOS (x86_64) zacpb
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: macos/x86_64-apple-darwin/release/zacpb
-          asset_name: zacpb_macos_x86_64
+          asset_name: zac-${{ github.ref_name }}-macos-x86_64
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -175,17 +147,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: windows/zac.exe
-          asset_name: zac_windows_x86_64.exe
-          asset_content_type: application/octet-stream
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Windows zacpb
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: windows/zacpb.exe
-          asset_name: zacpb_windows_x86_64.exe
+          asset_name: zac-${{ github.ref_name }}-windows-x86_64.exe
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -195,17 +157,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: linux/zac
-          asset_name: zac_linux_x86_64
-          asset_content_type: application/octet-stream
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Linux zacpb
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: linux/zacpb
-          asset_name: zacpb_linux_x86_64
+          asset_name: zac-${{ github.ref_name }}-linux-x86_64
           asset_content_type: application/octet-stream
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

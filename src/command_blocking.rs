@@ -20,9 +20,6 @@ pub fn fetch(
     // 没有已选课程，就提示用户选课
     if selected_courses.is_empty() {
         warning!("还没有已经选择的课程！");
-        #[cfg(feature = "pb")]
-        warning!("请运行 zacpb (--which | -w) 选择课程！");
-        #[cfg(not(feature = "pb"))]
         warning!("请运行 zac (--which | -w) 选择课程！");
         return;
     }
@@ -104,10 +101,7 @@ pub fn grade(session: &network::Session, default_account: &account::AccountData)
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 
-    try_or_log!(
-        command_share::grade_core(default_account, session),
-        "GRADE"
-    );
+    try_or_log!(command_share::grade_core(default_account, session), "GRADE");
 
     success!("GRADE");
 }

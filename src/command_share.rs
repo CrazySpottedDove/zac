@@ -140,7 +140,7 @@ pub fn config_core(
 ) -> Result<()> {
     config_help();
 
-    let prompt = format!("{} > ", "(config)".blue());
+    let prompt = format!("zac/config > ");
     loop {
         let mut rl = completer::build_generic_editor(completer::CommandType::ConfigCommand);
         match rl.readline(&prompt) {

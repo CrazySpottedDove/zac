@@ -37,13 +37,13 @@ Options:
 
 ## Advanced Suggestions
 
-作为命令行工具，推荐的是在终端中使用。本应用的主要耗时为登录雪灾浙大，而这一耗时可以通过保持应用开启避免。当这一耗时被避免，本应用可以保证所有相关操作速度快于雪灾浙大。而在资源占用上，应用待机消耗仅为 2MB，远低于浏览器消耗，相比终端本身的消耗也可以忽略不计。因此，在终端上开一个分网格给 zac/zacpb 是很好的方案。
+作为命令行工具，推荐的是在终端中使用。本应用的主要耗时为登录雪灾浙大，而这一耗时可以通过保持应用开启避免。当这一耗时被避免，本应用可以保证所有相关操作速度快于雪灾浙大。而在资源占用上，应用待机消耗仅为 2MB，远低于浏览器消耗，相比终端本身的消耗也可以忽略不计。因此，在终端上开一个分网格给 zac 是很好的方案。
 
 另外，添加到环境变量，无需多言。
 
 ## Data Safety?
 
-zac/zacpb 工具所有网络请求仅指向雪灾浙大，所有个人信息都储存在本地。
+zac 工具所有网络请求仅指向雪灾浙大和 Github，其中有关 Github 的网络请求只与用户手动更新有关，保证所有个人信息都储存在本地。
 
 ## Is the Upload Function Relieable?
 
@@ -65,7 +65,7 @@ zac/zacpb 工具所有网络请求仅指向雪灾浙大，所有个人信息都�
 
 ## How to Download?
 
-Release中提供了构建好的 windows 版本和 linux 版本，其中带 pb 后缀的是带进度条特性构建结果。用户可依自己需求下载。
+Release中提供了构建好的、不同平台的 windows 版本、macos 版本和 linux 版本。
 
 ## How to Build?
 
@@ -74,8 +74,7 @@ Release中提供了构建好的 windows 版本和 linux 版本，其中带 pb �
 对于 linux 版本，首先确保你拥有 rustc， cargo，然后在项目根目录使用
 
 ```bash
-cargo build --release --features pb --target-dir target_linux_pb --bin zacpb
-cargo build --release --target-dir target_linux_no_pb --bin zac
+cargo build --release
 ```
 
 如果希望构建 windows 版本，则确保你拥有交叉编译工具 x86_64-w64-mingw32-gcc，并通过 rustup 添加目标 x86_64-pc-windows-gnu
@@ -90,8 +89,7 @@ rustup target add x86_64-pc-windows-gnu
 然后，在项目根目录使用
 
 ```bash
-cargo build --release --features pb --target-dir target_windows_pb --target x86_64-pc-windows-gnu --bin zacpb
-cargo build --release --target-dir target_windows_no_pb
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
 如果直接在 Github 克隆本项目，则可以直接使用本项目的 workflows 文件获取不同平台构建结果。
@@ -105,3 +103,4 @@ assertion failed: fd != u32::MAX as RawFd
 ```
 
 * zac 未购买 CA 签名，下载时可能被 defender 拦截，此为正常现象，请信任 zac（保留，加入白名单）。
+* 当使用代理时，可能发生网络连接不稳定的问题。

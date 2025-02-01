@@ -7,3 +7,4 @@ pub mod completer;
 pub mod network;
 pub mod utils;
 pub mod macros;
+pub mod update;
