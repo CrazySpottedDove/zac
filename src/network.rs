@@ -156,6 +156,7 @@ impl Session {
             .cookie_provider(state.cookie_store.clone())
             .default_headers(headers)
             .timeout(std::time::Duration::from_secs(1200))
+            .no_proxy()
             .build()?;
 
         #[cfg(debug_assertions)]

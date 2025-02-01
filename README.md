@@ -103,4 +103,3 @@ assertion failed: fd != u32::MAX as RawFd
 ```
 
 * zac 未购买 CA 签名，下载时可能被 defender 拦截，此为正常现象，请信任 zac（保留，加入白名单）。
-* 当使用代理时，可能发生网络连接不稳定的问题。
