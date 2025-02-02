@@ -3,8 +3,7 @@ use crate::{
 };
 
 use ::serde::{Deserialize, Serialize};
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow,Result};
 use cookie_store::CookieStore;
 use num::ToPrimitive;
 use rayon::prelude::*;
@@ -83,7 +82,9 @@ impl State {
     /// 清除当前 cookie 和本地 cookie
     pub fn clear_cookie(&self) -> Result<()> {
         self.cookie_store.lock().unwrap().clear();
-        fs::remove_file(&self.path_cookies)?;
+        if self.path_cookies.exists() {
+            fs::remove_file(&self.path_cookies)?;
+        }
         Ok(())
     }
 }
