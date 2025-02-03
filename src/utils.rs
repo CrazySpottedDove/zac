@@ -8,7 +8,7 @@ pub const MULTISELECT_PROMPT: &str = "↑/↓ 选择 | Space 选中 | Enter 确�
 pub const MAX_RETRIES: u64 = 3;
 
 /// 获取配置文件路径!
-fn get_config_path() -> Result<PathBuf> {
+pub fn get_config_path() -> Result<PathBuf> {
     use std::env::var;
 
     #[cfg(target_os = "linux")]
@@ -83,9 +83,12 @@ impl Settings {
         Ok(())
     }
 
-    /// 设置存储目录!
+    /// 设置存储目录
+    /// 保证输入的路径是存在的目录
     pub fn set_storage_dir(&mut self, storage_dir: &str) -> Result<()> {
-        self.storage_dir = PathBuf::from(storage_dir);
+        let path = PathBuf::from(storage_dir);
+
+        self.storage_dir = path;
 
         let json = serde_json::to_string(self)?;
         fs::write(&self.path_settings, json)?;
@@ -115,7 +118,7 @@ impl Settings {
         Ok(())
     }
 
-    pub fn set_mp4_trashed(&mut self,  mp4_trashed: bool) -> Result<()> {
+    pub fn set_mp4_trashed(&mut self, mp4_trashed: bool) -> Result<()> {
         self.mp4_trashed = mp4_trashed;
         let json = serde_json::to_string(self)?;
         fs::write(&self.path_settings, json)?;
@@ -126,21 +129,13 @@ impl Settings {
     }
 
     pub fn list(&self) -> Result<()> {
-        let json = serde_json::to_string(self)?;
+        let json = serde_json::to_string_pretty(self)?;
         println!("{}", json);
         Ok(())
     }
 }
 
-pub struct Config {
-    // pub accounts: PathBuf,
-    // pub settings: PathBuf,
-    // pub courses: PathBuf,
-    // pub selected_courses: PathBuf,
-    // pub activity_upload_record: PathBuf,
-    // pub cookies: PathBuf,
-    // pub active_courses: PathBuf,
-}
+pub struct Config {}
 
 impl Config {
     pub fn init() -> Result<(

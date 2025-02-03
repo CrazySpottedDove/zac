@@ -1,4 +1,4 @@
-use crate::{error, warning};
+use crate::{error, try_or_exit, utils, warning};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::config::CompletionType;
 use rustyline::error::ReadlineError;
@@ -122,19 +122,28 @@ fn resolve_path_file(input: &str) -> Result<PathBuf, Box<dyn Error>> {
 
 /// 解析并验证文件路径，确保路径存在且是文件夹
 fn resolve_path_folder(input: &str) -> Result<PathBuf, Box<dyn Error>> {
+    use std::fs;
     let path = PathBuf::from(input);
 
-    let canonical_path = if path.is_absolute() {
-        path.canonicalize()?
+    // 如果是相对路径，则拼上当前工作目录
+    let resolved_path = if path.is_absolute() {
+        path
     } else {
         let current_dir = std::env::current_dir()?;
-        current_dir.join(path).canonicalize()?
+        current_dir.join(path)
     };
 
-    if canonical_path.is_file() {
-        Err(format!("{} 是文件，不是路径", canonical_path.display()).into())
+    // 如果路径已存在，且是文件则报错，否则正常返回其规范化路径
+    if resolved_path.exists() {
+        if resolved_path.is_file() {
+            return Err(format!("{} 是文件，不是目录", resolved_path.display()).into());
+        }
+        Ok(resolved_path)
     } else {
-        Ok(canonical_path)
+        // 若路径不存在，则创建对应文件夹
+        warning!("路径不存在，为您创建：{}", resolved_path.display());
+        fs::create_dir_all(&resolved_path)?;
+        Ok(resolved_path)
     }
 }
 
@@ -151,6 +160,8 @@ pub fn readin_storage_dir() -> String {
         completer: FilenameCompleter::new(),
         last_completions: RefCell::new(Vec::new()),
     }));
+    let example = try_or_exit!(utils::get_config_path(), "获取配置文件路径");
+    println!("示例路径：{}", example.display());
     loop {
         let readline = rl.readline("请输入存储路径：\n");
         match readline {
@@ -164,11 +175,11 @@ pub fn readin_storage_dir() -> String {
             },
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 warning!("强制中断");
-                std::process::exit(0);
+                return "EXIT".to_string();
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 warning!("强制中断");
-                std::process::exit(0);
+                return "EXIT".to_string();
             }
             Err(e) => {
                 error!("读取路径：{}", e);

@@ -117,15 +117,16 @@ pub fn upgrade_core(session: &network::Session) -> Result<()> {
 }
 
 fn config_help() {
-    println!("add-account | a：添加一个账户");
-    println!("remove-account | r：删除一个账户");
-    println!("user-default | u：设置默认用户");
-    println!("storage-dir | s：设置存储路径");
-    println!("mp4-trashed | m：设置是否跳过下载 mp4 文件");
-    println!("pdf-or-ppt | p：设置是否将 ppt 下载为 pdf");
-    println!("list-config | l：查看所有的配置");
-    println!("help | h：显示此帮助");
-    println!("Ctrl + C：退出配置模式\n");
+    println!("\x1b[90m当前处于配置模式，直接输入子命令即可：\x1b[0m");
+    println!("  \x1b[32madd-account (a)\x1b[0m        添加一个账户");
+    println!("  \x1b[32mremove-account (r)\x1b[0m     删除一个账户");
+    println!("  \x1b[32muser-default (u)\x1b[0m       设置默认用户");
+    println!("  \x1b[32mstorage-dir (s)\x1b[0m        设置存储路径");
+    println!("  \x1b[32mmp4-trashed (m)\x1b[0m        设置是否跳过下载 mp4 文件");
+    println!("  \x1b[32mpdf-or-ppt (p)\x1b[0m         设置是否将 ppt 下载为 pdf");
+    println!("  \x1b[32mlist-config (l)\x1b[0m        查看所有的配置");
+    println!("  \x1b[32mhelp (h)\x1b[0m               显示此帮助");
+    println!("  \x1b[33mCtrl + C\x1b[0m               退出配置模式");
 }
 
 /// 在 config 前，保证已经有了默认账号
@@ -208,9 +209,13 @@ pub fn config_core(
                 "storage_dir" | "s" => {
                     println!("当前存储目录：{}", settings.storage_dir.display());
                     let storage_dir = completer::readin_storage_dir();
+                    if storage_dir == "EXIT" {
+                        continue;
+                    }
                     try_or_throw!(settings.set_storage_dir(&storage_dir), "设置存储目录");
                 }
                 "mp4-trashed" | "m" => {
+                    println!("当前值：{}", settings.mp4_trashed);
                     print!("是否跳过下载 mp4 文件？(y/n)");
                     std::io::stdout().flush().unwrap();
                     let mut is_pdf = String::new();
@@ -231,6 +236,7 @@ pub fn config_core(
                     }
                 }
                 "pdf-or-ppt" | "p" => {
+                    println!("当前值：{}", settings.is_pdf);
                     print!("是否将 ppt 下载为 pdf？(y/n)");
                     std::io::stdout().flush().unwrap();
                     let mut is_pdf = String::new();
@@ -336,6 +342,11 @@ pub fn task_core(session: &network::Session) -> Result<()> {
     begin!("获取作业列表");
     let homework_list = try_or_throw!(session.get_homework_list(), "获取作业列表");
     end!("获取作业列表");
+
+    if homework_list.is_empty() {
+        println!("没有作业 :)");
+        return Ok(());
+    }
 
     for homework in homework_list {
         println!("  {}", homework.name);

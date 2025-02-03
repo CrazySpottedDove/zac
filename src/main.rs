@@ -114,7 +114,7 @@ fn single_iterative_term(
                 command_async::config(settings, account, session)?;
             }
             "help" | "h" => {
-                Cli::command().print_help()?;
+                command_async::help();
             }
             "update" => {
                 update::update()?;
