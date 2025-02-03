@@ -1,8 +1,8 @@
-use std::thread::JoinHandle;
 use anyhow::Result;
 use clap::{ArgGroup, Parser};
 use rustyline::history::FileHistory;
 use rustyline::Editor;
+use std::thread::JoinHandle;
 use zac::completer::GenericHelper;
 use zac::{account, check_up, command_async, command_blocking, completer, network, update, utils};
 use zac::{begin, end, error, success, try_or_log, warning};
