@@ -18,7 +18,7 @@ pub fn pre_login(
     })
 }
 pub fn help(){
-    println!("\x1b[90m当前处于交互模式，直接输入子命令即可：\x1b0m");
+    println!("\x1b[90m当前处于交互模式，直接输入子命令即可：\x1b[0m");
     println!("  \x1b[32mfetch (f)\x1b[0m     拉取课件");
     println!("  \x1b[32msubmit (s)\x1b[0m    提交作业");
     println!("  \x1b[32mupgrade (u)\x1b[0m   更新课程列表，有新课时用");
