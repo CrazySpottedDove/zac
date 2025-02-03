@@ -86,10 +86,11 @@ impl Account {
         let Ok((new_account, user)) = Self::read_in_account() else {
             return Err(anyhow!("输入账号"));
         };
-        self.accounts.insert(user.clone(), new_account);
+        self.accounts.insert(user.clone(), new_account.clone());
 
         let json = try_or_throw!(serde_json::to_string(&self.accounts), "序列化账号");
         try_or_throw!(fs::write(&self.path_accounts, json), "写入账号");
+        self.default = new_account;
         try_or_throw!(settings.set_default_user(&user), "设置默认用户");
 
         Ok(())
@@ -101,7 +102,7 @@ impl Account {
         self.accounts.remove(user);
         let json = try_or_throw!(serde_json::to_string(&self.accounts), "序列化账号");
         try_or_throw!(fs::write(&self.path_accounts, json), "写入账号");
-        success!("删除用户 {} -> {}", user, self.path_accounts.display());
+        success!("删除用户 {user} -> {}", self.path_accounts.display());
 
         if settings.user != user {
             return Ok(false);

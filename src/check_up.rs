@@ -24,7 +24,7 @@ use crate::success;
 /// )
 /// ```
 pub fn config_up() -> (
-    (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf),
+    (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf),
     utils::Settings,
 ) {
     #[cfg(debug_assertions)]
@@ -37,6 +37,7 @@ pub fn config_up() -> (
         path_activity_upload_record,
         path_cookies,
         path_active_courses,
+        path_active_semesters,
     ) = try_or_exit!(utils::Config::init(), "初始化配置文件");
 
     let mut settings = try_or_exit!(utils::Settings::load(path_settings), "读取配置文件");
@@ -62,6 +63,7 @@ pub fn config_up() -> (
             path_activity_upload_record,
             path_cookies,
             path_active_courses,
+            path_active_semesters,
         ),
         settings,
     )
@@ -89,7 +91,9 @@ pub fn session_up(
     path_active_courses: PathBuf,
     path_selected_courses: PathBuf,
     path_activity_upload_record: PathBuf,
+    path_active_semesters: PathBuf,
 ) -> network::Session {
+    #[cfg(debug_assertions)]
     process!("SESSIONUP");
 
     let session = try_or_exit!(
@@ -98,7 +102,8 @@ pub fn session_up(
             path_courses,
             path_active_courses,
             path_selected_courses,
-            path_activity_upload_record
+            path_activity_upload_record,
+            path_active_semesters
         ),
         "建立会话"
     );
@@ -128,14 +133,15 @@ pub fn course_up(session: &network::Session, default_account: &account::AccountD
 
         try_or_exit!(session.login(default_account), "登录");
 
-        let semester_map = try_or_exit!(session.get_semester_map(), "获取学期映射表");
+        let (semester_map , active_semester)= try_or_exit!(session.get_semester_map_and_active_semester(), "获取学期映射表");
 
         let course_list = try_or_exit!(session.get_course_list(), "获取课程列表");
 
         let semester_course_map =
             network::Session::to_semester_course_map(course_list, semester_map);
 
-        let active_courses = network::Session::filter_active_courses(&semester_course_map);
+        let active_semesters = network::Session::filter_active_semesters(&semester_course_map, &active_semester);
+        let active_courses = network::Session::filter_active_courses(&semester_course_map, &active_semesters);
 
         try_or_exit!(
             session.store_semester_course_map(&semester_course_map),
@@ -145,6 +151,11 @@ pub fn course_up(session: &network::Session, default_account: &account::AccountD
         try_or_exit!(
             session.store_active_courses(&active_courses),
             "存储活跃课程列表"
+        );
+
+        try_or_exit!(
+            session.store_active_semesters(&active_semesters),
+            "存储活跃学期列表"
         );
         end!("获取学期课程列表 & 活跃课程列表");
     }
@@ -166,6 +177,7 @@ pub fn all_up() -> (utils::Settings, account::Account, network::Session) {
             path_activity_upload_record,
             path_cookies,
             path_active_courses,
+            path_active_semesters,
         ),
         mut settings,
     ) = config_up();
@@ -176,6 +188,7 @@ pub fn all_up() -> (utils::Settings, account::Account, network::Session) {
         path_active_courses,
         path_selected_courses,
         path_activity_upload_record,
+        path_active_semesters,
     );
     course_up(&session, &account.default);
     (settings, account, session)
@@ -191,14 +204,14 @@ impl network::Session {
         end!("重新登录");
 
         begin!("获取学期课程列表 & 活跃课程列表");
-        let semester_map = try_or_exit!(self.get_semester_map(), "获取学期映射表");
+        let (semester_map,active_semester) = try_or_exit!(self.get_semester_map_and_active_semester(), "获取学期映射表");
 
         let course_list = try_or_exit!(self.get_course_list(), "获取课程列表");
 
         let semester_course_map =
             network::Session::to_semester_course_map(course_list, semester_map);
-
-        let active_courses = network::Session::filter_active_courses(&semester_course_map);
+        let active_semesters = network::Session::filter_active_semesters(&semester_course_map, &active_semester);
+        let active_courses = network::Session::filter_active_courses(&semester_course_map, &active_semesters);
 
         try_or_exit!(
             self.store_semester_course_map(&semester_course_map),
@@ -208,6 +221,11 @@ impl network::Session {
         try_or_exit!(
             self.store_active_courses(&active_courses),
             "存储活跃课程列表"
+        );
+
+        try_or_exit!(
+            self.store_active_semesters(&active_semesters),
+            "存储活跃学期列表"
         );
 
         end!("获取学期课程列表 & 活跃课程列表");

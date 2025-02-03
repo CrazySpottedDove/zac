@@ -146,6 +146,7 @@ impl Config {
         PathBuf,
         PathBuf,
         PathBuf,
+        PathBuf,
     )> {
         let config_path = get_config_path()?;
 
@@ -184,6 +185,10 @@ impl Config {
             Config::active_courses_init(&active_courses)?;
         }
 
+        let active_semesters = config_path.join("active_semesters.json");
+        if !active_semesters.exists() {
+            Config::active_semesters_init(&active_semesters)?;
+        }
         Ok((
             accounts,
             settings,
@@ -192,6 +197,7 @@ impl Config {
             activity_upload_record,
             cookies,
             active_courses,
+            active_semesters,
         ))
     }
 
@@ -252,6 +258,13 @@ impl Config {
     fn active_courses_init(active_courses: &PathBuf) -> Result<()> {
         fs::write(active_courses, "[]")?;
         success!("初始化 active_courses 文件 -> {}", active_courses.display());
+        Ok(())
+    }
+
+    /// 初始化 active_semesters 文件！
+    fn active_semesters_init(active_semesters: &PathBuf) -> Result<()> {
+        fs::write(active_semesters, "[]")?;
+        success!("初始化 active_semesters 文件 -> {}", active_semesters.display());
         Ok(())
     }
 }

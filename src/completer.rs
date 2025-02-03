@@ -86,14 +86,14 @@ impl Hinter for FilePathHelper {
 impl Highlighter for FilePathHelper {
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
         // 使用 ANSI 转义序列设置提示的颜色
-        Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint)) // 90 是灰色
+        Cow::Owned(format!("\x1b[90m{hint}\x1b[0m")) // 90 是灰色
     }
 
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         // 检查输入是否与最近的补全项中的任何一个匹配
         let last_comps = self.last_completions.borrow();
         if last_comps.contains(&line.to_string()) {
-            Cow::Owned(format!("\x1b[1;32m{}\x1b[0m", line)) // 加粗并设置为绿色
+            Cow::Owned(format!("\x1b[1;32m{line}\x1b[0m")) // 加粗并设置为绿色
         } else {
             Cow::Borrowed(line)
         }
@@ -170,7 +170,7 @@ pub fn readin_storage_dir() -> String {
                     return path.to_str().unwrap().to_string();
                 }
                 Err(e) => {
-                    warning!("{}", e);
+                    warning!("{e}");
                 }
             },
             Err(rustyline::error::ReadlineError::Interrupted) => {
@@ -182,7 +182,7 @@ pub fn readin_storage_dir() -> String {
                 return "EXIT".to_string();
             }
             Err(e) => {
-                error!("读取路径：{}", e);
+                error!("读取路径：{e}");
             }
         }
     }
@@ -217,14 +217,14 @@ pub fn readin_path() -> PathBuf {
                         if EXPECTED_FILE_TYPES.contains(&extension) {
                             return path;
                         } else {
-                            warning!("不支持的文件类型: {}", extension);
+                            warning!("不支持的文件类型: {extension}");
                         }
                     } else {
                         warning!("无法解析文件扩展名");
                     }
                 }
                 Err(e) => {
-                    warning!("{}", e);
+                    warning!("{e}");
                 }
             },
             Err(rustyline::error::ReadlineError::Interrupted) => {
@@ -236,7 +236,7 @@ pub fn readin_path() -> PathBuf {
                 return PathBuf::new();
             }
             Err(e) => {
-                error!("读取路径：{}", e);
+                error!("读取路径：{e}");
             }
         }
     }
@@ -305,7 +305,7 @@ impl Validator for GenericHelper {}
 impl Highlighter for GenericHelper {
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
         // 使用 ANSI 转义序列设置提示的颜色
-        Cow::Owned(format!("\x1b[90m{}\x1b[0m", hint)) // 90 是灰色
+        Cow::Owned(format!("\x1b[90m{hint}\x1b[0m")) // 90 是灰色
     }
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         let commands = match self.completer.commands {
@@ -315,7 +315,7 @@ impl Highlighter for GenericHelper {
         // 检查输入是否完全匹配任何命令
         if commands.contains(&line) {
             // 使用绿色高亮完全匹配的输入
-            Cow::Owned(format!("\x1b[1;32m{}\x1b[0m", line)) // 加粗并设置为绿色
+            Cow::Owned(format!("\x1b[1;32m{line}\x1b[0m")) // 加粗并设置为绿色
         } else {
             Cow::Borrowed(line)
         }
@@ -326,7 +326,7 @@ impl Highlighter for GenericHelper {
         prompt: &'b str,
         _default: bool,
     ) -> Cow<'b, str> {
-        Cow::Owned(format!("\x1b[1;34m{}\x1b[0m", prompt)) // 加粗并设置为蓝色
+        Cow::Owned(format!("\x1b[1;34m{prompt}\x1b[0m")) // 加粗并设置为蓝色
     }
 }
 impl Hinter for GenericHelper {

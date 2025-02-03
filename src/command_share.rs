@@ -96,7 +96,10 @@ pub fn submit_core(session: &network::Session) -> Result<()> {
 
 pub fn upgrade_core(session: &network::Session) -> Result<()> {
     begin!("获取学期映射表 & 课程列表");
-    let semester_map = try_or_throw!(session.get_semester_map(), "获取学期映射表");
+    let (semester_map, active_semester) = try_or_throw!(
+        session.get_semester_map_and_active_semester(),
+        "获取学期映射表"
+    );
     let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
     end!("获取学期映射表 & 课程列表");
 
@@ -106,11 +109,17 @@ pub fn upgrade_core(session: &network::Session) -> Result<()> {
         "存储 学期->课程 映射表"
     );
 
-    let active_courses = network::Session::filter_active_courses(&semester_course_map);
+    let active_semesters = network::Session::filter_active_semesters(&semester_course_map, &active_semester);
+    let active_courses = network::Session::filter_active_courses(&semester_course_map, &active_semesters);
 
     try_or_throw!(
         session.store_active_courses(&active_courses),
         "存储活跃课程列表"
+    );
+
+    try_or_throw!(
+        session.store_active_semesters(&active_semesters),
+        "存储活跃学期列表"
     );
 
     Ok(())
@@ -270,7 +279,7 @@ pub fn config_core(
                 break;
             }
             Err(e) => {
-                error!("输入错误：{}", e);
+                error!("输入错误：{e}");
             }
         }
     }

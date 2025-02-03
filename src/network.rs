@@ -3,7 +3,7 @@ use crate::{
 };
 
 use ::serde::{Deserialize, Serialize};
-use anyhow::{anyhow,Result};
+use anyhow::{anyhow, Result};
 use cookie_store::CookieStore;
 use num::ToPrimitive;
 use rayon::prelude::*;
@@ -132,6 +132,7 @@ pub struct Session {
     path_active_courses: PathBuf,
     path_selected_courses: PathBuf,
     path_activity_upload_record: PathBuf,
+    path_active_semesters: PathBuf,
 }
 
 impl Session {
@@ -142,6 +143,7 @@ impl Session {
         path_active_courses: PathBuf,
         path_selected_courses: PathBuf,
         path_activity_upload_record: PathBuf,
+        path_active_semesters: PathBuf,
     ) -> Result<Session> {
         let state = State::try_new(path_cookies)?;
         let state = Arc::new(state);
@@ -170,6 +172,7 @@ impl Session {
             path_active_courses,
             path_selected_courses,
             path_activity_upload_record,
+            path_active_semesters,
         })
     }
 
@@ -281,27 +284,31 @@ impl Session {
     }
 
     /// 获取学期映射表(id -> name)
-    pub fn get_semester_map(&self) -> Result<HashMap<u64, String>> {
+    pub fn get_semester_map_and_active_semester(&self) -> Result<(HashMap<u64, String>, String)> {
         let res = self
             .client
             .get("https://courses.zju.edu.cn/api/my-semesters?")
             .send()?;
 
         let json: Value = res.json()?;
-        let semester_map: Result<HashMap<u64, String>> = json["semesters"]
+        let mut active_semester = String::new();
+        let semester_map: HashMap<u64, String> = json["semesters"]
             .as_array()
             .unwrap()
             .iter()
             .map(|c| {
                 let sid = c["id"].as_u64().unwrap();
                 let name = c["name"].as_str().unwrap_or_default().to_string();
-                Ok((sid, name))
+                if c["is_active"].as_bool().unwrap() {
+                    active_semester = name.clone();
+                }
+                (sid, name)
             })
             .collect();
 
         #[cfg(debug_assertions)]
         success!("获取学期映射表");
-        semester_map
+        Ok((semester_map, active_semester))
     }
 
     /// 获取课程列表
@@ -431,41 +438,32 @@ impl Session {
                         if let Some(activities) = json["activities"].as_array() {
                             #[cfg(debug_assertions)]
                             success!("{}::activities", course_name.trim());
-
                             return Ok(activities.clone());
                         } else {
                             println!("{:#?}", json);
                             warning!(
-                                "retry {}/{}: {} 的返回 json 无 activities 字段",
-                                attempt,
+                                "retry {attempt}/{}: {course_name} 的返回 json 无 activities 字段",
                                 utils::MAX_RETRIES,
-                                course_name
                             );
                         }
                     }
                     Err(e) => {
                         #[cfg(debug_assertions)]
                         warning!(
-                            "retry {}/{}: {} 的返回无法解析为 json: {}",
-                            attempt,
+                            "retry {attempt}/{}: {course_name} 的返回无法解析为 json: {e}",
                             utils::MAX_RETRIES,
-                            course_name,
-                            e
                         );
                     }
                 },
                 Err(e) => {
                     warning!(
-                        "retry {}/{}: {} 的请求失败: {}",
-                        attempt,
+                        "retry {attempt}/{}: {course_name} 的请求失败: {e}",
                         utils::MAX_RETRIES,
-                        course_name,
-                        e
                     );
                 }
             }
         }
-        Err(anyhow!("{} 的请求失败", course_name))
+        Err(anyhow!("{course_name} 的请求失败"))
     }
 
     /// 拉取下载任务！
@@ -785,13 +783,20 @@ impl Session {
         Ok(id)
     }
 
+    /// 将 学期 -> 课程 映射表转换为活跃学期列表
+    pub fn filter_active_semesters(
+        semester_course_map: &HashMap<String, Vec<CourseData>>,
+        active_semester: &str,
+    ) -> Vec<String> {
+        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+        filter_latest_group(&semester_list, active_semester)
+    }
+
     /// 将 学期 -> 课程 映射表转换为活跃课程列表
     pub fn filter_active_courses(
         semester_course_map: &HashMap<String, Vec<CourseData>>,
+        filtered_semester_list: &Vec<String>,
     ) -> Vec<CourseData> {
-        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
-        let filtered_semester_list = filter_latest_group(&semester_list);
-
         let courses: Vec<CourseData> = filtered_semester_list
             .iter()
             .map(|semester| semester_course_map.get(semester).unwrap().clone())
@@ -821,6 +826,30 @@ impl Session {
 
         #[cfg(debug_assertions)]
         success!("存储活跃课程");
+
+        Ok(())
+    }
+
+    /// 加载活跃学期
+    pub fn load_active_semesters(&self) -> Result<Vec<String>> {
+        let data = fs::read_to_string(&self.path_active_semesters)?;
+        let active_semesters: Vec<String> = serde_json::from_str(&data)?;
+
+        #[cfg(debug_assertions)]
+        success!("加载活跃学期");
+
+        Ok(active_semesters)
+    }
+
+    /// 存储活跃学期
+    pub fn store_active_semesters(&self, active_semesters: &Vec<String>) -> Result<()> {
+        fs::write(
+            &self.path_active_semesters,
+            serde_json::to_string(active_semesters)?,
+        )?;
+
+        #[cfg(debug_assertions)]
+        success!("存储活跃学期");
 
         Ok(())
     }
@@ -874,9 +903,9 @@ impl Session {
                                                 let ddl = format_ddl(hw["deadline"].as_str().unwrap());
                                                 let status = hw["submitted"].as_bool().unwrap();
                                                 let (status_signal, ddl) = if status {
-                                                    ("\x1b[32m✓\x1b[0m", format!("\x1b[32m{}\x1b[0m", ddl))
+                                                    ("\x1b[32m✓\x1b[0m", format!("\x1b[32m{ddl}\x1b[0m"))
                                                 } else {
-                                                    ("\x1b[33m!\x1b[0m", format!("\x1b[33m{}\x1b[0m", ddl))
+                                                    ("\x1b[33m!\x1b[0m", format!("\x1b[33m{ddl}\x1b[0m"))
                                                 };
                                                 let name = format!(
                                                     "{} {}::{}\n\t{}\n\t{}",
@@ -995,10 +1024,8 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let semester_course_map = self.load_semester_course_map()?;
-        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
-        let filtered_semester_list = filter_latest_group(&semester_list);
-        let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
+        let active_semester_list = self.load_active_semesters()?;
+        let filtered_semester_group_list: Vec<(&str, &str)> = active_semester_list
             .iter()
             .map(|semester| split_semester(semester))
             .collect();
@@ -1075,10 +1102,8 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let semester_course_map = self.load_semester_course_map()?;
-        let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
-        let filtered_semester_list = filter_latest_group(&semester_list);
-        let filtered_semester_group_list: Vec<(&str, &str)> = filtered_semester_list
+        let active_semester_list = self.load_active_semesters()?;
+        let filtered_semester_group_list: Vec<(&str, &str)> = active_semester_list
             .iter()
             .map(|semester| split_semester(semester))
             .collect();
@@ -1136,7 +1161,7 @@ impl Session {
         let avg_gpa_semester = weight_sum_semester / credit_sum_semester;
         let avg_gpa_year = weight_sum_year / credit_sum_year;
         let table = create_table(&grade_list);
-        println!("{}", table);
+        println!("{table}");
         println!(
             "学期均绩：{:.2}/{:.1}",
             avg_gpa_semester, credit_sum_semester
@@ -1227,7 +1252,10 @@ fn suffix_order(suffix: &str) -> (u8, u8) {
 
 /// 根据已有的 split_semester, parse_year_prefix, suffix_order
 /// 返回：具备“最大年前缀”和“最大后缀group”的所有项，并按subpriority降序排列。
-fn filter_latest_group(semesters: &[String]) -> Vec<String> {
+fn filter_latest_group(semesters: &[String], active_semester: &str) -> Vec<String> {
+    let splitted = split_semester(active_semester);
+    let max_year = parse_year_prefix(splitted.0);
+    let max_group = suffix_order(splitted.1).0;
     let mut parsed = Vec::new();
     for sem in semesters {
         let (prefix, suffix) = split_semester(sem);
@@ -1236,17 +1264,11 @@ fn filter_latest_group(semesters: &[String]) -> Vec<String> {
         parsed.push((sem.clone(), year, group, sub));
     }
 
-    // 1) 找出最大的年前缀
-    let max_year = parsed.iter().map(|(_, y, _, _)| *y).max().unwrap_or(0);
-    // 2) 只保留年前缀= max_year 的项目
     let filtered: Vec<_> = parsed
         .into_iter()
         .filter(|(_, y, _, _)| *y == max_year)
         .collect();
 
-    // 3) 在这些项目里，找出最大的 group
-    let max_group = filtered.iter().map(|(_, _, g, _)| *g).max().unwrap_or(0);
-    // 4) 只保留 group= max_group 的项目
     let mut final_items: Vec<_> = filtered
         .into_iter()
         .filter(|(_, _, g, _)| *g == max_group)
@@ -1384,8 +1406,8 @@ fn format_gpa_str(gpa: f64) -> String {
 
 fn format_class_name(name: &str, credit_num: f64) -> String {
     match credit_num {
-        4.0..=5.0 => format!("\x1b[35m{}\x1b[0m", name), // 紫色
-        2.0..=3.0 => format!("\x1b[34m{}\x1b[0m", name), // 蓝色
-        _ => name.to_string(),                           // 白色
+        4.0..=5.0 => format!("\x1b[35m{name}\x1b[0m"), // 紫色
+        2.0..=3.0 => format!("\x1b[34m{name}\x1b[0m"), // 蓝色
+        _ => name.to_string(),                         // 白色
     }
 }

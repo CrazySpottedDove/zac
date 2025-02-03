@@ -34,7 +34,7 @@ macro_rules! process {
 #[macro_export]
 macro_rules! waiting {
     ($($arg:tt)*) => ({
-        println!("{} {}……","⌛" ,format!($($arg)*));
+        println!("⌛ {}……" ,format!($($arg)*));
     })
 }
 
@@ -42,7 +42,7 @@ macro_rules! waiting {
 macro_rules! begin {
     ($($arg:tt)*) => ({
         use std::io::Write;
-        print!("{} {}","⌛" ,format!($($arg)*));
+        print!("⌛ {}" ,format!($($arg)*));
         std::io::stdout().flush().unwrap();
     })
 }
