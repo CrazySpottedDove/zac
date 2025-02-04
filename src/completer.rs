@@ -208,7 +208,7 @@ pub fn readin_path() -> PathBuf {
         last_completions: RefCell::new(Vec::new()),
     }));
     loop {
-        let readline = rl.readline("请输入文件(3GB 以内)路径：\n");
+        let readline = rl.readline("请输入文件(3GB 以内)路径(绝对或相对均可)：\n");
         match readline {
             Ok(line) => match resolve_path_file(&line) {
                 Ok(path) => {

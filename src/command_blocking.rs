@@ -11,7 +11,6 @@ pub fn fetch(
     process!("FETCH");
 
     begin!("登录");
-
     try_or_log!(session.login(&default_account), "登录");
     end!("登录");
 

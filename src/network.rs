@@ -581,26 +581,23 @@ impl Session {
                     let pb = multi_pb.add(ProgressBar::new(0));
                     pb.set_style(pb_style.clone());
                     pb.set_message(format!("\x1b[34m⚙\x1b[0m {}", file_name));
-                    match self.download_upload(
+                    if let Err(e) = self.download_upload(
                         &settings.storage_dir.join(semester).join(course_name),
                         *upload_id,
                         file_name,
                         settings.is_pdf,
                         pb,
                     ) {
-                        Ok(_) => Some(*upload_id),
-                        Err(e) => {
-                            error!("下载 {} ：{}", file_name, e);
-                            None
-                        }
+                        error!("下载 {file_name} ：{e}");
+                        return None;
                     }
+                    Some(*upload_id)
                 })
                 .collect();
             if !successful_uploads.is_empty() {
                 activity_upload_record.extend(successful_uploads);
-                match self.store_activity_upload_record(&activity_upload_record) {
-                    Ok(_) => {}
-                    Err(e) => error!("存储下载课件记录：{}", e),
+                if let Err(e) = self.store_activity_upload_record(&activity_upload_record) {
+                    error!("存储下载课件记录：{e}");
                 }
             }
         });
@@ -620,32 +617,29 @@ impl Session {
         let download_url = if is_pdf {
             let mut retries = 0;
             loop {
-                let json:Value = self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{}/url?preview=true",id)).send()?.json().or_else(|e| {
-                        error!("json失败：{}", e);
+                let json:Value = self.get(format!("https://courses.zju.edu.cn/api/uploads/reference/document/{id}/url?preview=true")).send()?.json().or_else(|e| {
+                        error!("json失败：{e}");
                         Err(e)
                     })?;
 
                 let Some(status) = json["status"].as_str() else {
-                    return Err(anyhow::anyhow!("json 不含 status 字段"));
+                    return Err(anyhow!("json 不含 status 字段"));
                 };
                 if status == "ready" {
                     let Some(url) = json["url"].as_str() else {
-                        return Err(anyhow::anyhow!("json 不含 url 字段"));
+                        return Err(anyhow!("json 不含 url 字段"));
                     };
                     break url.to_string();
                 }
 
                 retries += 1;
-                if retries == 3 {
-                    error!("雪灾浙大一直准备不好 {}", name);
+                if retries == utils::MAX_RETRIES {
+                    error!("雪灾浙大一直准备不好 {name}");
                     return Ok(());
                 }
             }
         } else {
-            format!(
-                "https://courses.zju.edu.cn/api/uploads/reference/{}/blob",
-                id
-            )
+            format!("https://courses.zju.edu.cn/api/uploads/reference/{id}/blob")
         };
 
         let mut res = self.get(&download_url).send()?;
@@ -692,7 +686,7 @@ impl Session {
             pb.inc(bytes as u64);
         }
 
-        pb.finish_with_message(format!("\x1b[32m✓\x1b[0m {}", file_name));
+        pb.finish_with_message(format!("\x1b[32m✓\x1b[0m {file_name}"));
         Ok(())
     }
 
@@ -729,19 +723,19 @@ impl Session {
                     #[cfg(debug_assertions)]
                     println!("POST response as JSON: {:#?}", json_unjudged);
                     if json_unjudged["errors"].is_object() {
-                        error!("雪灾浙大不支持{}的文件类型", file_name);
-                        return Ok(0);
+                        let err = &json_unjudged["errors"];
+                        return Err(anyhow!("上传文件出错：{err}"));
                     }
                     json = Some(json_unjudged);
                     break;
                 }
                 Err(_) => {
                     #[cfg(debug_assertions)]
-                    warning!("POST attempt {}/{} Failed", attempt, utils::MAX_RETRIES);
+                    warning!("POST attempt {attempt}/{} Failed", utils::MAX_RETRIES);
                 }
             }
             #[cfg(debug_assertions)]
-            warning!("retry {}/{}: 上传请求失败", attempt, utils::MAX_RETRIES);
+            warning!("retry {attempt}/{}: 上传请求失败", utils::MAX_RETRIES);
         }
 
         #[cfg(debug_assertions)]
@@ -774,11 +768,11 @@ impl Session {
         if !res.status().is_success() {
             let status = res.status();
             let text = res.text().unwrap_or_default();
-            return Err(anyhow!("上传状态码：{}，响应内容：{}", status, text));
+            return Err(anyhow!("上传状态码：{status}，响应内容：{text}"));
         }
 
         #[cfg(debug_assertions)]
-        success!("上传文件：{}", file_name);
+        success!("上传文件：{file_name}");
 
         Ok(id)
     }
@@ -866,15 +860,15 @@ impl Session {
                 let url = format!("https://courses.zju.edu.cn/api/courses/{}/homework-activities?page=1&page_size=100&reloadPage=false",course.id);
                 let mut homeworks:Vec<Homework> =Vec::new();
                 for attempt in 1..=utils::MAX_RETRIES{
+                    #[cfg(debug_assertions)]
+                    let start = std::time::Instant::now();
                     let session = self.clone();
                     match session.client.get(&url).send(){
                         Err(e) => {
                             warning!(
-                                "retry {}/{}: {} 的请求失败: {}",
-                                attempt,
+                                "retry {attempt}/{}: {} 的请求失败: {e}",
                                 utils::MAX_RETRIES,
-                                course.name,
-                                e
+                                course.name
                             );
                         },
                         Ok(res)=> {
@@ -882,11 +876,9 @@ impl Session {
                                 Err(e)=>{
                                     #[cfg(debug_assertions)]
                                     warning!(
-                                        "retry {}/{}: {} 的返回无法解析为 json: {}",
-                                        attempt,
+                                        "retry {attempt}/{}: {} 的返回无法解析为 json: {e}",
                                         utils::MAX_RETRIES,
-                                        course.name,
-                                        e
+                                        course.name
                                     );
                                 },
                                 Ok(json)=>{
@@ -908,16 +900,15 @@ impl Session {
                                                     ("\x1b[33m!\x1b[0m", format!("\x1b[33m{ddl}\x1b[0m"))
                                                 };
                                                 let name = format!(
-                                                    "{} {}::{}\n\t{}\n\t{}",
-                                                    status_signal,
+                                                    "{status_signal} {}::{}\n\t{ddl}\n\t{description}",
                                                     course.name,
-                                                    hw["title"].as_str().unwrap(),
-                                                    ddl,
-                                                    description
+                                                    hw["title"].as_str().unwrap()
                                                 );
                                                 Homework { id, name }
                                             })
                                             .collect::<Vec<Homework>>());
+                                        #[cfg(debug_assertions)]
+                                        println!("{}::homeworks: {:?}", course.name, start.elapsed());
                                         break;
                                     }
                                 },
@@ -943,13 +934,11 @@ impl Session {
         file_id: u64,
         mut comment: String,
     ) -> Result<()> {
-        let handin_url = format!(
-            "https://courses.zju.edu.cn/api/course/activities/{}/submissions",
-            homework_id
-        );
+        let handin_url =
+            format!("https://courses.zju.edu.cn/api/course/activities/{homework_id}/submissions");
 
         if !comment.is_empty() {
-            comment = format!("<p>{}<br></p>", comment);
+            comment = format!("<p>{comment}<br></p>");
         }
         let payload = json!({
             "comment":comment,
@@ -979,7 +968,7 @@ impl Session {
                 break;
             }
             #[cfg(debug_assertions)]
-            warning!("retry {}/{}: 上传请求失败", attempt, utils::MAX_RETRIES);
+            warning!("retry {attempt}/{}: 上传请求失败", utils::MAX_RETRIES);
         }
 
         if json.is_none() {
@@ -1043,7 +1032,12 @@ impl Session {
         let mut credit_sum_semester = 0.0;
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
-
+        let mut big_class_weight_sum = 0.0;
+        let mut big_class_credit_sum = 0.0;
+        let mut middle_class_weight_sum = 0.0;
+        let mut middle_class_credit_sum = 0.0;
+        let mut small_class_weight_sum = 0.0;
+        let mut small_class_credit_sum = 0.0;
         let all_grade_list: Vec<Grade> = grade_json
             .iter()
             .filter_map(|grade_json| {
@@ -1057,10 +1051,27 @@ impl Session {
                 let xn = obj["xn"].as_str()?;
                 let credit = obj["xf"].as_str()?;
                 let gpa = obj["jd"].as_f64()?;
-                let gpa_str = format_gpa_str(gpa);
+                let gpa_str = format_gpa_str(gpa,1);
                 let credit_num: f64 = credit.parse().unwrap();
-                let name_str = format_class_name(name, credit_num);
-
+                let class_type = decide_class_type(credit_num);
+                let name_str;
+                match class_type {
+                    Class::Big => {
+                        name_str = format!("\x1b[35m{name}\x1b[0m");
+                        big_class_weight_sum += gpa * credit_num;
+                        big_class_credit_sum += credit_num;
+                    }
+                    Class::Middle => {
+                        name_str = format!("\x1b[34m{name}\x1b[0m");
+                        middle_class_weight_sum += gpa * credit_num;
+                        middle_class_credit_sum += credit_num;
+                    }
+                    Class::Small => {
+                        name_str = name.to_string();
+                        small_class_weight_sum += gpa * credit_num;
+                        small_class_credit_sum += credit_num;
+                    }
+                }
                 weight_sum += gpa * credit_num;
                 credit_sum += credit_num;
                 if xn_set.contains(xn) {
@@ -1080,16 +1091,23 @@ impl Session {
             })
             .collect();
 
-        let avg_gpa = weight_sum / credit_sum;
-        let avg_gpa_semester = weight_sum_semester / credit_sum_semester;
-        let avg_gpa_year = weight_sum_year / credit_sum_year;
-        println!("{}", create_table(&all_grade_list));
+        let avg_gpa = format_gpa_str(weight_sum / credit_sum, 2);
+        let avg_gpa_semester = format_gpa_str(weight_sum_semester / credit_sum_semester, 2);
+        let avg_gpa_year = format_gpa_str(weight_sum_year / credit_sum_year, 2);
+        let avg_gpa_big_class = format_gpa_str(big_class_weight_sum / big_class_credit_sum, 2);
+        let avg_gpa_middle_class = format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
+        let avg_gpa_small_class = format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
+        let table = create_table(&all_grade_list);
+        println!("{table}");
+        println!("学期均绩 | {avg_gpa_semester}/{credit_sum_semester:.1}");
+        println!("学年均绩 | {avg_gpa_year}/{credit_sum_year:.1}");
+        println!("总均绩   | {avg_gpa}/{credit_sum:.1}");
+        println!("\x1b[35m大课均绩\x1b[0m | {avg_gpa_big_class}/{big_class_credit_sum:.1}");
         println!(
-            "学期均绩：{:.2}/{:.1}",
-            avg_gpa_semester, credit_sum_semester
+            "\x1b[34m中课均绩\x1b[0m | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}"
         );
-        println!("学年均绩：{:.2}/{:.1}", avg_gpa_year, credit_sum_year);
-        println!(" 总均绩 ：{:.2}/{:.1}", avg_gpa, credit_sum);
+        println!("小课均绩 | {avg_gpa_small_class}/{small_class_credit_sum:.1}");
+
         Ok(())
     }
 
@@ -1121,6 +1139,12 @@ impl Session {
         let mut credit_sum_semester = 0.0;
         let mut weight_sum_year = 0.0;
         let mut credit_sum_year = 0.0;
+        let mut big_class_weight_sum = 0.0;
+        let mut big_class_credit_sum = 0.0;
+        let mut middle_class_weight_sum = 0.0;
+        let mut middle_class_credit_sum = 0.0;
+        let mut small_class_weight_sum = 0.0;
+        let mut small_class_credit_sum = 0.0;
 
         let grade_list: Vec<Grade> = grade_json
             .iter()
@@ -1142,8 +1166,26 @@ impl Session {
                     credit_sum_year += credit_num;
                     if xq_set.contains(xq) {
                         let name = obj["kcmc"].as_str()?;
-                        let gpa_str = format_gpa_str(gpa);
-                        let name_str = format_class_name(name, credit_num);
+                        let gpa_str = format_gpa_str(gpa,1);
+                        let class_type = decide_class_type(credit_num);
+                        let name_str;
+                        match class_type {
+                            Class::Big => {
+                                name_str = format!("\x1b[35m{name}\x1b[0m");
+                                big_class_weight_sum += gpa * credit_num;
+                                big_class_credit_sum += credit_num;
+                            }
+                            Class::Middle => {
+                                name_str = format!("\x1b[34m{name}\x1b[0m");
+                                middle_class_weight_sum += gpa * credit_num;
+                                middle_class_credit_sum += credit_num;
+                            }
+                            Class::Small => {
+                                name_str = name.to_string();
+                                small_class_weight_sum += gpa * credit_num;
+                                small_class_credit_sum += credit_num;
+                            }
+                        }
                         weight_sum_semester += gpa * credit_num;
                         credit_sum_semester += credit_num;
                         return Some(Grade {
@@ -1157,17 +1199,22 @@ impl Session {
                 None
             })
             .collect();
-        let avg_gpa = weight_sum / credit_sum;
-        let avg_gpa_semester = weight_sum_semester / credit_sum_semester;
-        let avg_gpa_year = weight_sum_year / credit_sum_year;
+        let avg_gpa = format_gpa_str(weight_sum / credit_sum, 2);
+        let avg_gpa_semester = format_gpa_str(weight_sum_semester / credit_sum_semester, 2);
+        let avg_gpa_year = format_gpa_str(weight_sum_year / credit_sum_year, 2);
+        let avg_gpa_big_class = format_gpa_str(big_class_weight_sum / big_class_credit_sum, 2);
+        let avg_gpa_middle_class = format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
+        let avg_gpa_small_class = format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
         let table = create_table(&grade_list);
         println!("{table}");
+        println!("学期均绩     | {avg_gpa_semester}/{credit_sum_semester:.1}");
+        println!("学年均绩     | {avg_gpa_year}/{credit_sum_year:.1}");
+        println!("总均绩       | {avg_gpa}/{credit_sum:.1}");
+        println!("\x1b[35m学期大课均绩\x1b[0m | {avg_gpa_big_class}/{big_class_credit_sum:.1}");
         println!(
-            "学期均绩：{:.2}/{:.1}",
-            avg_gpa_semester, credit_sum_semester
+            "\x1b[34m学期中课均绩\x1b[0m | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}"
         );
-        println!("学年均绩：{:.2}/{:.1}", avg_gpa_year, credit_sum_year);
-        println!(" 总均绩 ：{:.2}/{:.1}", avg_gpa, credit_sum);
+        println!("学期小课均绩 | {avg_gpa_small_class}/{small_class_credit_sum:.1}");
 
         Ok(())
     }
@@ -1393,21 +1440,26 @@ fn create_table(data: &[Grade]) -> String {
     table
 }
 
-fn format_gpa_str(gpa: f64) -> String {
-    let formatted_gpa = format!("{:.1}", gpa);
+fn format_gpa_str(gpa: f64, precision: usize) -> String {
+    let formatted_gpa = format!("{gpa:.precision$}");
     match gpa {
-        4.5..=5.0 => format!("\x1b[32m{}\x1b[0m", formatted_gpa), // 绿色
-        3.5..4.5 => format!("\x1b[36m{}\x1b[0m", formatted_gpa),  // 青色
-        2.4..3.5 => format!("\x1b[33m{}\x1b[0m", formatted_gpa),  // 黄色
-        0.0..2.4 => format!("\x1b[31m{}\x1b[0m", formatted_gpa),  // 红色
-        _ => formatted_gpa,                                       // 白色
+        4.5..=5.0 => format!("\x1b[32m{formatted_gpa}\x1b[0m"), // 绿色
+        3.5..4.5 => format!("\x1b[36m{formatted_gpa}\x1b[0m"),  // 青色
+        2.4..3.5 => format!("\x1b[33m{formatted_gpa}\x1b[0m"),  // 黄色
+        0.0..2.4 => format!("\x1b[31m{formatted_gpa}\x1b[0m"),  // 红色
+        _ => formatted_gpa,                                     // 白色
     }
 }
 
-fn format_class_name(name: &str, credit_num: f64) -> String {
+enum Class {
+    Big,
+    Middle,
+    Small,
+}
+fn decide_class_type(credit_num: f64) -> Class {
     match credit_num {
-        4.0..=5.0 => format!("\x1b[35m{name}\x1b[0m"), // 紫色
-        2.0..=3.0 => format!("\x1b[34m{name}\x1b[0m"), // 蓝色
-        _ => name.to_string(),                         // 白色
+        4.0..=5.0 => Class::Big,
+        2.0..=3.0 => Class::Middle,
+        _ => Class::Small,
     }
 }
