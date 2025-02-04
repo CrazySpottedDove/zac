@@ -22,8 +22,10 @@ html2text="0.13.6"
 self_update = "0.42.0"
 
 [profile.release]
-opt-level = "z"
-panic = "abort"
-codegen-units = 1
-lto = true
-strip = "symbols"
+opt-level = 3         # 启用最高级别优化（-O3），尽可能提取性能
+lto = "fat"           # 使用全量 LTO，允许跨模块全局优化
+codegen-units = 1     # 将代码生成单元数量设为 1，允许编译器做最充分的全局优化
+panic = "abort"       # 使用 abort 模式以减少 panic 时的额外开销
+strip = true          # 剥除调试符号，减小二进制文件大小（可有助于加载时间）
+debug = false         # 禁止生成调试信息
+incremental = false   # 关闭增量编译，确保全量优化
