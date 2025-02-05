@@ -17,12 +17,12 @@ use serde_json::json;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{stdout, Read, Stdout};
+use std::io::{stdout, Read};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use termion::raw::RawTerminal;
+
 const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
 const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
 const HOME_URL: &str = "https://courses.zju.edu.cn";
@@ -1220,17 +1220,18 @@ impl Session {
         Ok((xn_set, xq_set))
     }
     pub fn polling(&self, account: &account::AccountData) -> Result<()> {
-        use termion::async_stdin;
-        use termion::event::Key;
-        use termion::input::TermRead;
-        use termion::raw::IntoRawMode;
-        let mut stdout = stdout().into_raw_mode().expect("failed to enter raw mode");
-        let mut stdin = async_stdin().keys();
-        fn raw_println(str: &str, stdout: &mut RawTerminal<Stdout>) {
+        use crossterm::{
+            event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+
+        enable_raw_mode().expect("failed to enable raw mode");
+        let mut stdout = stdout();
+        fn raw_println(str: &str, stdout: &mut impl Write) {
             print!("{str}\r\n");
             stdout.flush().unwrap();
         }
-        fn alert(stdout: &mut RawTerminal<Stdout>) {
+        fn alert(stdout: &mut impl Write) {
             for _ in 1..=3 {
                 print!("\x07");
                 stdout.flush().unwrap();
@@ -1244,8 +1245,8 @@ impl Session {
             try_or_throw!(self.get_active_year_and_semester(), "获取活跃学年学期");
         let mut known_courses: HashSet<String> = HashSet::new();
         // 显示提示信息，让用户了解可通过 Ctrl+C 或 q 键退出
-        raw_println("按 Ctrl + C 或 q 键退出持续查询...", &mut stdout);
-        raw_println(&gray!("(课程 | 成绩 | 绩点 | 学分)"), &mut stdout);
+        raw_println("按 Ctrl + C / q / Esc 退出持续查询...", &mut stdout);
+        raw_println(&gray!("( 课程 | 成绩 | 绩点 | 学分 )"), &mut stdout);
         for grade_value in grade_json.iter() {
             let Some(obj) = grade_value.as_object() else {
                 continue;
@@ -1298,13 +1299,21 @@ impl Session {
         'outer: loop {
             let mut elapsed = Duration::new(0, 0);
             while elapsed < TOTAL_SLEEP_TIME {
-                if let Some(Ok(key)) = stdin.next() {
-                    match key {
-                        Key::Ctrl('c') | Key::Char('q') => break 'outer,
-                        _ => {}
+                // 使用 poll 检查按键事件，超时时间 SLEEP_INTERVAL
+                if event::poll(SLEEP_INTERVAL).unwrap() {
+                    if let Event::Key(KeyEvent { code, .. }) = event::read().unwrap() {
+                        match code {
+                            KeyCode::Char('q') => break 'outer,
+                            KeyCode::Char('c')
+                                if KeyModifiers::CONTROL == KeyModifiers::CONTROL =>
+                            {
+                                break 'outer
+                            }
+                            KeyCode::Esc => break 'outer,
+                            _ => {}
+                        }
                     }
                 }
-                std::thread::sleep(SLEEP_INTERVAL);
                 elapsed += SLEEP_INTERVAL;
             }
             let new_grade_json = self.query_grades(form.clone())?;
@@ -1360,6 +1369,7 @@ impl Session {
                 alert(&mut stdout);
             }
         }
+        disable_raw_mode().expect("failed to disable raw mode");
         Ok(())
     }
 }
