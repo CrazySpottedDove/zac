@@ -1,5 +1,5 @@
 use crate::{
-    account, begin, completer, end, error, network, process, try_or_exit, utils,
+    account, begin, command_share, completer, end, error, network, process, try_or_exit, utils,
     warning,
 };
 use std::path::PathBuf;
@@ -133,40 +133,8 @@ pub fn course_up(session: &network::Session, default_account: &account::AccountD
     // 处理课程列表为空的情况
     if semester_course_map.is_empty() {
         warning!("无 学期->课程 映射表 => 获取 学期->课程 映射表与已选课程");
-        begin!("获取 学期->课程 映射表与已选课程");
-
         try_or_exit!(session.login(default_account), "登录");
-
-        let (semester_map, active_semester) = try_or_exit!(
-            session.get_semester_map_and_active_semester(),
-            "获取学期映射表"
-        );
-
-        let course_list = try_or_exit!(session.get_course_list(), "获取课程列表");
-
-        let semester_course_map =
-            network::Session::to_semester_course_map(course_list, semester_map);
-
-        let active_semesters =
-            network::Session::filter_active_semesters(&semester_course_map, &active_semester);
-        let active_courses =
-            network::Session::filter_active_courses(&semester_course_map, &active_semesters);
-
-        try_or_exit!(
-            session.store_semester_course_map(&semester_course_map),
-            "存储 学期->课程 映射表"
-        );
-
-        try_or_exit!(
-            session.store_active_courses(&active_courses),
-            "存储活跃课程列表"
-        );
-
-        try_or_exit!(
-            session.store_active_semesters(&active_semesters),
-            "存储活跃学期列表"
-        );
-        end!("获取 学期->课程 映射表与已选课程");
+        try_or_exit!(command_share::upgrade_core(session), "UPGRADE");
     }
 
     #[cfg(debug_assertions)]
@@ -212,37 +180,7 @@ impl network::Session {
         try_or_exit!(self.relogin(default_account), "重新登录");
         end!("重新登录");
 
-        begin!("获取 学期->课程 映射表与已选课程");
-        let (semester_map, active_semester) = try_or_exit!(
-            self.get_semester_map_and_active_semester(),
-            "获取学期映射表"
-        );
-
-        let course_list = try_or_exit!(self.get_course_list(), "获取课程列表");
-
-        let semester_course_map =
-            network::Session::to_semester_course_map(course_list, semester_map);
-        let active_semesters =
-            network::Session::filter_active_semesters(&semester_course_map, &active_semester);
-        let active_courses =
-            network::Session::filter_active_courses(&semester_course_map, &active_semesters);
-
-        try_or_exit!(
-            self.store_semester_course_map(&semester_course_map),
-            "存储 学期->课程 映射表"
-        );
-
-        try_or_exit!(
-            self.store_active_courses(&active_courses),
-            "存储活跃课程列表"
-        );
-
-        try_or_exit!(
-            self.store_active_semesters(&active_semesters),
-            "存储活跃学期列表"
-        );
-
-        end!("获取 学期->课程 映射表与已选课程");
+        try_or_exit!(command_share::upgrade_core(self), "UPGRADE");
 
         try_or_exit!(self.store_selected_courses(&Vec::new()), "清空已选课程");
     }

@@ -116,3 +116,15 @@ pub fn g(session: &network::Session, default_account: &account::AccountData) {
 
     success!("GRADE");
 }
+
+pub fn polling(session: &network::Session, default_account: &account::AccountData) {
+    process!("POLLING");
+
+    begin!("登录");
+    try_or_log!(session.login(&default_account), "登录");
+    end!("登录");
+
+    try_or_log!(command_share::polling_core(&session, default_account), "POLLING");
+
+    success!("POLLING");
+}

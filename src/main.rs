@@ -44,6 +44,9 @@ struct Cli {
     /// 查看本学期成绩
     #[arg(short)]
     g: bool,
+    /// 持续查询本学期成绩
+    #[arg(short, long)]
+    polling: bool,
     /// 配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
     #[arg(short, long)]
     config: bool,
@@ -132,6 +135,9 @@ fn single_iterative_term(
                 );
                 command_async::g(session, &account.default)?;
             }
+            "p" | "polling" => {
+                command_async::polling(session, &account.default)?;
+            }
             "config" | "c" => {
                 command_async::config(settings, account, session)?;
             }
@@ -179,6 +185,8 @@ fn main() {
         command_blocking::grade(&session, &account.default);
     } else if cli.g {
         command_blocking::g(&session, &account.default);
+    } else if cli.polling {
+        command_blocking::polling(&session, &account.default);
     } else if cli.update {
         try_or_log!(update::update(), "更新");
     } else {

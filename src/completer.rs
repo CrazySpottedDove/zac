@@ -14,8 +14,8 @@ use std::error::Error;
 use std::path::PathBuf;
 
 const MAIN_COMMANDS: &[&str] = &[
-    "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "version", "h", "f",
-    "s", "u", "c", "w", "g", "t", "v", "update",
+    "help", "fetch", "submit", "upgrade", "config", "which", "grade", "task", "version", "polling",
+    "h", "f", "s", "u", "c", "w", "g", "t", "v", "p", "update",
 ];
 const CONFIG_MAIN_COMMANDS: &[&str] = &[
     "help",

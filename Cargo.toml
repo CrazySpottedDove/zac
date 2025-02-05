@@ -20,6 +20,7 @@ rustyline="15.0.0"
 chrono="0.4"
 html2text="0.13.6"
 self_update = "0.42.0"
+termion = "4.0.3"
 
 [profile.release]
 opt-level = 3         # 启用最高级别优化（-O3），尽可能提取性能

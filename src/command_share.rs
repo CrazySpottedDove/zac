@@ -96,11 +96,6 @@ pub fn submit_core(session: &network::Session) -> Result<()> {
 
 pub fn upgrade_core(session: &network::Session) -> Result<()> {
     begin!("获取学期映射表 & 课程列表");
-    // let (semester_map, active_semester) = try_or_throw!(
-    //     session.get_semester_map_and_active_semester(),
-    //     "获取学期映射表"
-    // );
-    // let course_list = try_or_throw!(session.get_course_list(), "获取课程列表");
     let (semester_map_result, course_list_result) = rayon::join(
         || session.get_semester_map_and_active_semester(),
         || session.get_course_list(),
@@ -378,5 +373,10 @@ pub fn grade_core(account: &account::AccountData, session: &network::Session) ->
 
 pub fn g_core(account: &account::AccountData, session: &network::Session) -> Result<()> {
     try_or_throw!(session.get_g(&account), "获取成绩列表");
+    Ok(())
+}
+
+pub fn polling_core(session: &network::Session, account: &account::AccountData) -> Result<()> {
+    try_or_throw!(session.polling(account), "持续查询成绩");
     Ok(())
 }

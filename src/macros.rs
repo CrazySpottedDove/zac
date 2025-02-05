@@ -136,3 +136,53 @@ macro_rules! try_or_exit {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! red {
+    ($($arg:tt)*) => {{
+        format!("\x1B[31m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! green {
+    ($($arg:tt)*) => {{
+        format!("\x1B[32m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! yellow {
+    ($($arg:tt)*) => {{
+        format!("\x1B[33m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! blue {
+    ($($arg:tt)*) => {{
+        format!("\x1B[34m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! purple {
+    ($($arg:tt)*) => {{
+        format!("\x1B[35m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! cyan {
+    ($($arg:tt)*) => {{
+        format!("\x1B[36m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! gray {
+    ($($arg:tt)*) => {{
+        format!("\x1B[90m{}\x1B[0m", format!($($arg)*))
+    }};
+}
+

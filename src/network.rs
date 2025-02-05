@@ -1,6 +1,7 @@
 use crate::{
     account, begin, end, error, success, try_or_exit, try_or_throw, utils, waiting, warning,
 };
+use crate::{blue, gray, purple};
 
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, Result};
@@ -14,13 +15,14 @@ use reqwest::header::{HeaderMap, USER_AGENT};
 use reqwest_cookie_store::CookieStoreMutex;
 use serde_json::json;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{stdout, Read, Stdout};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
-
+use std::time::Duration;
+use termion::raw::RawTerminal;
 const LOGIN_URL: &str = "https://zjuam.zju.edu.cn/cas/login";
 const PUBKEY_URL: &str = "https://zjuam.zju.edu.cn/cas/v2/getPubKey";
 const HOME_URL: &str = "https://courses.zju.edu.cn";
@@ -1013,19 +1015,8 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let active_semester_list = self.load_active_semesters()?;
-        let filtered_semester_group_list: Vec<(&str, &str)> = active_semester_list
-            .iter()
-            .map(|semester| split_semester(semester))
-            .collect();
-        let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
-            .iter()
-            .map(|(xn, _)| *xn)
-            .collect();
-        let xq_set: std::collections::HashSet<&str> = filtered_semester_group_list
-            .iter()
-            .map(|(_, xq)| *xq)
-            .collect();
+        let (xn_set, xq_set) =
+            try_or_throw!(self.get_active_year_and_semester(), "获取活跃学年学期");
         let mut weight_sum = 0.0;
         let mut credit_sum = 0.0;
         let mut weight_sum_semester = 0.0;
@@ -1051,7 +1042,7 @@ impl Session {
                 let xn = obj["xn"].as_str()?;
                 let credit = obj["xf"].as_str()?;
                 let gpa = obj["jd"].as_f64()?;
-                let gpa_str = format_gpa_str(gpa,1);
+                let gpa_str = format_gpa_str(gpa, 1);
                 let credit_num: f64 = credit.parse().unwrap();
                 let class_type = decide_class_type(credit_num);
                 let name_str;
@@ -1095,17 +1086,17 @@ impl Session {
         let avg_gpa_semester = format_gpa_str(weight_sum_semester / credit_sum_semester, 2);
         let avg_gpa_year = format_gpa_str(weight_sum_year / credit_sum_year, 2);
         let avg_gpa_big_class = format_gpa_str(big_class_weight_sum / big_class_credit_sum, 2);
-        let avg_gpa_middle_class = format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
-        let avg_gpa_small_class = format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
+        let avg_gpa_middle_class =
+            format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
+        let avg_gpa_small_class =
+            format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
         let table = create_table(&all_grade_list);
         println!("{table}");
         println!("学期均绩 | {avg_gpa_semester}/{credit_sum_semester:.1}");
         println!("学年均绩 | {avg_gpa_year}/{credit_sum_year:.1}");
         println!("总均绩   | {avg_gpa}/{credit_sum:.1}");
         println!("\x1b[35m大课均绩\x1b[0m | {avg_gpa_big_class}/{big_class_credit_sum:.1}");
-        println!(
-            "\x1b[34m中课均绩\x1b[0m | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}"
-        );
+        println!("\x1b[34m中课均绩\x1b[0m | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}");
         println!("小课均绩 | {avg_gpa_small_class}/{small_class_credit_sum:.1}");
 
         Ok(())
@@ -1120,19 +1111,8 @@ impl Session {
         let grade_json = self.query_grades(form)?;
         end!("查询成绩");
 
-        let active_semester_list = self.load_active_semesters()?;
-        let filtered_semester_group_list: Vec<(&str, &str)> = active_semester_list
-            .iter()
-            .map(|semester| split_semester(semester))
-            .collect();
-        let xn_set: std::collections::HashSet<&str> = filtered_semester_group_list
-            .iter()
-            .map(|(xn, _)| *xn)
-            .collect();
-        let xq_set: std::collections::HashSet<&str> = filtered_semester_group_list
-            .iter()
-            .map(|(_, xq)| *xq)
-            .collect();
+        let (xn_set, xq_set) =
+            try_or_throw!(self.get_active_year_and_semester(), "获取活跃学年学期");
         let mut weight_sum = 0.0;
         let mut credit_sum = 0.0;
         let mut weight_sum_semester = 0.0;
@@ -1166,7 +1146,7 @@ impl Session {
                     credit_sum_year += credit_num;
                     if xq_set.contains(xq) {
                         let name = obj["kcmc"].as_str()?;
-                        let gpa_str = format_gpa_str(gpa,1);
+                        let gpa_str = format_gpa_str(gpa, 1);
                         let class_type = decide_class_type(credit_num);
                         let name_str;
                         match class_type {
@@ -1203,19 +1183,183 @@ impl Session {
         let avg_gpa_semester = format_gpa_str(weight_sum_semester / credit_sum_semester, 2);
         let avg_gpa_year = format_gpa_str(weight_sum_year / credit_sum_year, 2);
         let avg_gpa_big_class = format_gpa_str(big_class_weight_sum / big_class_credit_sum, 2);
-        let avg_gpa_middle_class = format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
-        let avg_gpa_small_class = format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
+        let avg_gpa_middle_class =
+            format_gpa_str(middle_class_weight_sum / middle_class_credit_sum, 2);
+        let avg_gpa_small_class =
+            format_gpa_str(small_class_weight_sum / small_class_credit_sum, 2);
         let table = create_table(&grade_list);
         println!("{table}");
         println!("学期均绩     | {avg_gpa_semester}/{credit_sum_semester:.1}");
         println!("学年均绩     | {avg_gpa_year}/{credit_sum_year:.1}");
         println!("总均绩       | {avg_gpa}/{credit_sum:.1}");
-        println!("\x1b[35m学期大课均绩\x1b[0m | {avg_gpa_big_class}/{big_class_credit_sum:.1}");
         println!(
-            "\x1b[34m学期中课均绩\x1b[0m | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}"
+            "{} | {avg_gpa_big_class}/{big_class_credit_sum:.1}",
+            purple!("学期大课均绩")
+        );
+        println!(
+            "{} | {avg_gpa_middle_class}/{middle_class_credit_sum:.1}",
+            blue!("学期中课均绩")
         );
         println!("学期小课均绩 | {avg_gpa_small_class}/{small_class_credit_sum:.1}");
 
+        Ok(())
+    }
+    fn get_active_year_and_semester(&self) -> Result<(HashSet<String>, HashSet<String>)> {
+        let active_semester_list = self.load_active_semesters()?;
+        let (xn_set, xq_set): (HashSet<String>, HashSet<String>) = active_semester_list
+            .iter()
+            .map(|semester| split_semester(semester))
+            .fold(
+                (HashSet::new(), HashSet::new()),
+                |(mut xn, mut xq), (a, b)| {
+                    xn.insert(a.to_owned());
+                    xq.insert(b.to_owned());
+                    (xn, xq)
+                },
+            );
+        Ok((xn_set, xq_set))
+    }
+    pub fn polling(&self, account: &account::AccountData) -> Result<()> {
+        use termion::async_stdin;
+        use termion::event::Key;
+        use termion::input::TermRead;
+        use termion::raw::IntoRawMode;
+        let mut stdout = stdout().into_raw_mode().expect("failed to enter raw mode");
+        let mut stdin = async_stdin().keys();
+        fn raw_println(str: &str, stdout: &mut RawTerminal<Stdout>) {
+            print!("{str}\r\n");
+            stdout.flush().unwrap();
+        }
+        fn alert(stdout: &mut RawTerminal<Stdout>) {
+            for _ in 1..=3 {
+                print!("\x07");
+                stdout.flush().unwrap();
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+        // 首次查询本学期已出成绩
+        let form = json!({ "xh": account.stuid });
+        let grade_json = self.query_grades(form.clone())?;
+        let (xn_set, xq_set) =
+            try_or_throw!(self.get_active_year_and_semester(), "获取活跃学年学期");
+        let mut known_courses: HashSet<String> = HashSet::new();
+        // 显示提示信息，让用户了解可通过 Ctrl+C 或 q 键退出
+        raw_println("按 Ctrl + C 或 q 键退出持续查询...", &mut stdout);
+        raw_println(&gray!("(课程 | 成绩 | 绩点 | 学分)"), &mut stdout);
+        for grade_value in grade_json.iter() {
+            let Some(obj) = grade_value.as_object() else {
+                continue;
+            };
+            let (xq, xn) = (obj["xq"].as_str().unwrap(), obj["xn"].as_str().unwrap());
+            if !xn_set.contains(xn) || !xq_set.contains(xq) {
+                continue;
+            }
+            // 忽略“弃修”成绩
+            let grade = match obj.get("cj").and_then(|v| v.as_str()) {
+                Some(s) if s != "弃修" => s,
+                _ => continue,
+            };
+
+            let name = obj.get("kcmc").and_then(|v| v.as_str()).unwrap();
+            let gpa = obj.get("jd").and_then(|v| v.as_f64()).unwrap();
+            let credit = obj.get("xf").and_then(|v| v.as_str()).unwrap();
+            let credit_num: f64 = credit.parse().unwrap();
+            let class_type = decide_class_type(credit_num);
+            let name_str;
+            match class_type {
+                Class::Big => {
+                    name_str = purple!("{name}");
+                }
+                Class::Middle => {
+                    name_str = blue!("{name}");
+                }
+                Class::Small => {
+                    name_str = name.to_string();
+                }
+            }
+            let gpa_str = format_gpa_str(gpa, 1);
+            // 直接打印格式：课程名称 | 成绩 | 绩点 | 学分
+            let width = (30 + width_shift(&name_str)) as usize;
+            raw_println(
+                &format!("{name_str:width$} | {grade} | {gpa_str} | {credit}"),
+                &mut stdout,
+            );
+            known_courses.insert(name.to_string());
+        }
+
+        const TOTAL_SLEEP_TIME: Duration = if cfg!(debug_assertions) {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(600)
+        };
+        const SLEEP_INTERVAL: Duration = Duration::from_millis(200);
+
+        // 循环查询，每 10 分钟检查一次
+        'outer: loop {
+            let mut elapsed = Duration::new(0, 0);
+            while elapsed < TOTAL_SLEEP_TIME {
+                if let Some(Ok(key)) = stdin.next() {
+                    match key {
+                        Key::Ctrl('c') | Key::Char('q') => break 'outer,
+                        _ => {}
+                    }
+                }
+                std::thread::sleep(SLEEP_INTERVAL);
+                elapsed += SLEEP_INTERVAL;
+            }
+            let new_grade_json = self.query_grades(form.clone())?;
+            let mut found_new = false;
+            for grade_value in new_grade_json.iter() {
+                let Some(obj) = grade_value.as_object() else {
+                    continue;
+                };
+                let (xq, xn) = (obj["xq"].as_str().unwrap(), obj["xn"].as_str().unwrap());
+                if !xn_set.contains(xn) || !xq_set.contains(xq) {
+                    continue;
+                }
+                // 忽略“弃修”
+                let grade = match obj.get("cj").and_then(|v| v.as_str()) {
+                    Some(s) if s != "弃修" => s,
+                    _ => continue,
+                };
+                let name = obj.get("kcmc").and_then(|v| v.as_str()).unwrap_or("");
+                if known_courses.contains(name) {
+                    continue;
+                }
+                found_new = true;
+                let gpa = obj.get("jd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let credit = obj.get("xf").and_then(|v| v.as_str()).unwrap_or("");
+                let credit_num: f64 = credit.parse().unwrap();
+                let class_type = decide_class_type(credit_num);
+                let name_str;
+                match class_type {
+                    Class::Big => {
+                        name_str = purple!("!{name}");
+                    }
+                    Class::Middle => {
+                        name_str = blue!("!{name}");
+                    }
+                    Class::Small => {
+                        name_str = format!("!{name}");
+                    }
+                }
+                let gpa_str = format_gpa_str(gpa, 1);
+                // 直接打印格式：课程名称 | 成绩 | 绩点 | 学分
+                let width = (30 + width_shift(&name_str)) as usize;
+
+                raw_println(
+                    &format!("{name_str:width$} | {grade} | {gpa_str} | {credit}"),
+                    &mut stdout,
+                );
+
+                known_courses.insert(name.to_string());
+                alert(&mut stdout);
+            }
+            #[cfg(debug_assertions)]
+            if !found_new {
+                alert(&mut stdout);
+            }
+        }
         Ok(())
     }
 }
@@ -1417,7 +1561,7 @@ fn create_table(data: &[Grade]) -> String {
     table.push('|');
     for (header, &width) in HEADERS.iter().zip(column_widths.iter()) {
         let total_width = width - wide_char_num(header);
-        let padded = format!(" {:width$} |", header, width = total_width);
+        let padded = format!(" {header:total_width$} |");
         table.push_str(&padded);
     }
     table.push('\n');
@@ -1431,7 +1575,7 @@ fn create_table(data: &[Grade]) -> String {
             let total_width = (width.to_isize().unwrap() + width_shift(col))
                 .to_usize()
                 .unwrap();
-            let padded = format!(" {:width$} |", col, width = total_width);
+            let padded = format!(" {col:total_width$} |");
             table.push_str(&padded);
         }
         table.push('\n');
@@ -1458,8 +1602,8 @@ enum Class {
 }
 fn decide_class_type(credit_num: f64) -> Class {
     match credit_num {
-        4.0..=5.0 => Class::Big,
-        2.0..=3.0 => Class::Middle,
+        3.5..=7.0 => Class::Big,
+        2.0..3.5 => Class::Middle,
         _ => Class::Small,
     }
 }

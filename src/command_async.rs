@@ -17,7 +17,7 @@ pub fn pre_login(
         try_or_exit!(session.login(&default_account), "登录");
     })
 }
-pub fn help(){
+pub fn help() {
     println!("\x1b[90m当前处于交互模式，直接输入子命令即可：\x1b[0m");
     println!("  \x1b[32mfetch (f)\x1b[0m     拉取课件");
     println!("  \x1b[32msubmit (s)\x1b[0m    提交作业");
@@ -26,7 +26,9 @@ pub fn help(){
     println!("  \x1b[32mtask (t)\x1b[0m      查看作业");
     println!("  \x1b[32mgrade\x1b[0m         查看所有成绩");
     println!("  \x1b[32mg\x1b[0m             查看本学期成绩");
-    println!("  \x1b[32mconfig (c)\x1b[0m    配置 [用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]");
+    println!(
+        "  \x1b[32mconfig (c)\x1b[0m    配置 [用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]"
+    );
     println!("  \x1b[32mupdate\x1b[0m        执行更新");
     println!("  \x1b[32mversion (v)\x1b[0m   显示版本信息");
     println!("  \x1b[32mhelp (h)\x1b[0m      显示此帮助信息");
@@ -131,5 +133,15 @@ pub fn g(session: &network::Session, default_account: &account::AccountData) -> 
 
     success!("GRADE");
 
+    Ok(())
+}
+
+pub fn polling(session: &network::Session, default_account: &account::AccountData) -> Result<()> {
+    process!("POLLING");
+    try_or_throw!(
+        command_share::polling_core(session, default_account),
+        "POLLING"
+    );
+    success!("POLLING");
     Ok(())
 }
