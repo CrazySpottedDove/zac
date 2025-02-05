@@ -26,6 +26,7 @@ Options:
   -t, --task     查看作业
       --grade    查看所有成绩
   -g             查看本学期成绩
+  -p, --polling  持续查询本学期成绩
   -c, --config   配置[用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
       --update   执行更新
   -h, --help     Print help
@@ -35,6 +36,23 @@ Options:
 更为推荐的方法是不加参数使用命令/直接双击（什？），进入交互模式。针对交互模式做了预登录，可以略微减少等待时间。
 
 交互模式可用的命令和一次性模式一致。
+
+```help
+当前处于交互模式，直接输入子命令即可：
+  fetch (f)     拉取课件
+  submit (s)    提交作业
+  upgrade (u)   更新课程列表，有新课时用
+  which (w)     选择需要拉取的课程
+  task (t)      查看作业
+  grade         查看所有成绩
+  g             查看本学期成绩
+  polling (p)   持续查询本学期成绩
+  config (c)    配置 [用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]
+  update        执行更新
+  version (v)   显示版本信息
+  help (h)      显示此帮助信息
+  Ctrl + C      退出 zac
+```
 
 ## Advanced Suggestions
 

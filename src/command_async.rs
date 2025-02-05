@@ -26,6 +26,7 @@ pub fn help() {
     println!("  \x1b[32mtask (t)\x1b[0m      查看作业");
     println!("  \x1b[32mgrade\x1b[0m         查看所有成绩");
     println!("  \x1b[32mg\x1b[0m             查看本学期成绩");
+    println!("  \x1b[32mpolling (p)\x1b[0m   持续查询本学期成绩");
     println!(
         "  \x1b[32mconfig (c)\x1b[0m    配置 [用户，存储目录，是否 ppt 转 pdf，是否下载 mp4 文件]"
     );
