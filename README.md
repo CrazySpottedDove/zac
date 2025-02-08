@@ -1,4 +1,4 @@
-# ZAC (Zju-Assistant-Cli)
+# [ZAC (Zju-Assistant-Cli)](https://crazyspotteddove.github.io/projects/zac)
 
 一个用于代替雪灾浙大网页端的命令行操作工具，支持拉取课件，提交作业。
 
