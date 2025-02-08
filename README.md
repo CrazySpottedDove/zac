@@ -15,7 +15,7 @@
 
 一次性模式用法如下：
 
-```help
+```bash
 Usage: zac [OPTIONS]
 
 Options:
@@ -37,7 +37,7 @@ Options:
 
 交互模式可用的命令和一次性模式一致。
 
-```help
+```bash
 当前处于交互模式，直接输入子命令即可：
   fetch (f)     拉取课件
   submit (s)    提交作业

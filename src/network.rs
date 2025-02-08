@@ -1482,6 +1482,22 @@ fn filter_latest_group(semesters: &[String], active_semester: &str) -> Vec<Strin
     final_items.into_iter().map(|(s, _, _, _)| s).collect()
 }
 
+pub fn compare_semester(a:&str, b:&str)->std::cmp::Ordering{
+    let (a_prefix, a_suffix) = split_semester(a);
+    let (b_prefix, b_suffix) = split_semester(b);
+
+    let (a_year, b_year) = (parse_year_prefix(a_prefix),parse_year_prefix(b_prefix));
+    if a_year != b_year{
+        return a_year.cmp(&b_year);
+    }
+    let (a_group, a_sub) = suffix_order(a_suffix);
+    let (b_group, b_sub) = suffix_order(b_suffix);
+    if a_group != b_group{
+        return a_group.cmp(&b_group);
+    }
+    a_sub.cmp(&b_sub)
+}
+
 fn format_ddl(original_ddl: &str) -> String {
     use chrono::{DateTime, Utc};
     let time = DateTime::parse_from_rfc3339(original_ddl).unwrap();

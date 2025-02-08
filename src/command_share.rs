@@ -296,7 +296,8 @@ pub fn which_core(session: &network::Session) -> Result<()> {
     let semester_course_map =
         try_or_throw!(session.load_semester_course_map(), "加载 学期->课程 映射表");
 
-    let semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+    let mut semester_list: Vec<String> = semester_course_map.keys().cloned().collect();
+    semester_list.sort_by(|b, a| network::compare_semester(a, b));
 
     let mut selected_courses = Vec::new();
     match MultiSelect::with_theme(&ColorfulTheme::default())
