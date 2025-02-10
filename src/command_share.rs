@@ -218,7 +218,7 @@ pub fn config_core(
                         }
                     }
                 }
-                "storage_dir" | "s" => {
+                "storage-dir" | "s" => {
                     println!("当前存储目录：{}", settings.storage_dir.display());
                     let storage_dir = completer::readin_storage_dir();
                     if storage_dir == "EXIT" {
